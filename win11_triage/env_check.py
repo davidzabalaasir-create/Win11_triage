@@ -126,3 +126,36 @@ def relaunch_as_admin(args: list[str]) -> bool:
         exe, params = sys.executable, subprocess.list2cmdline(["-m", "win11_triage.gui", *args])
     rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, None, 1)  # type: ignore[attr-defined]
     return int(rc) > 32
+
+
+def winget_available() -> bool:
+    return is_windows() and shutil.which("winget") is not None
+
+
+def winget_install(name: str, timeout: int = 600) -> tuple[bool, str]:
+    """Instala una herramienta de Sysinternals con winget (sin elevar). Devuelve (ok, salida)."""
+    pkg = TOOLS[name]["winget"]
+    cmd = [
+        "winget",
+        "install",
+        "--id",
+        pkg,
+        "-e",
+        "--silent",
+        "--accept-source-agreements",
+        "--accept-package-agreements",
+    ]
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return False, str(e)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    # winget devuelve != 0 también si ya estaba instalado: se comprueba buscando la herramienta.
+    return find_tool(name).found or proc.returncode == 0, out.strip()[-500:]

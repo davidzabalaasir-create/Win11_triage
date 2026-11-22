@@ -51,25 +51,49 @@ jobs:
     needs: test
     runs-on: windows-latest
     permissions:
-      contents: write  # solo para adjuntar los .exe a la release en tags v*
+      contents: write  # solo para adjuntar los binarios a la release en tags v*
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - name: Compilar ejecutables
+      - name: Instalar Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Compilar aplicación e instalador
         shell: pwsh
         run: ./scripts/build_exe.ps1
-      - name: Probar el ejecutable de consola
-        run: dist\win11-triage.exe --dry-run --no-color --no-report
+      - name: Instalar, abrir la app y desinstalar (prueba real)
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\win11-triage-setup-*.exe | Select-Object -First 1
+          $dir = Join-Path $env:RUNNER_TEMP "w11t-app"
+          $cfg = Join-Path $env:RUNNER_TEMP "w11t-cfg"
+          Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER","/DIR=$dir","/TASKS=" -Wait
+          if (-not (Test-Path "$dir\win11-triage-gui.exe")) { throw "La instalación no creó el ejecutable" }
+
+          & "$dir\win11-triage.exe" --dry-run --no-color --no-report --config-dir $cfg
+          if ($LASTEXITCODE) { throw "La versión de consola falló ($LASTEXITCODE)" }
+
+          $p = Start-Process "$dir\win11-triage-gui.exe" -ArgumentList "--selftest","--config-dir",$cfg -Wait -PassThru
+          Get-Content "$cfg\logs\win11-triage.log" -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { throw "La interfaz no arrancó correctamente (código $($p.ExitCode))" }
+
+          Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait
+          # El desinstalador se relanza desde %TEMP%: se espera a que termine de verdad.
+          for ($i = 0; $i -lt 30 -and (Test-Path "$dir\win11-triage-gui.exe"); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path "$dir\win11-triage-gui.exe") { throw "La desinstalación dejó ficheros" }
       - uses: actions/upload-artifact@v4
         with:
           name: win11-triage-windows
-          path: dist/*.exe
+          path: |
+            dist/win11-triage-setup-*.exe
+            dist/win11-triage-portable-*.zip
       - name: Publicar release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.exe
+          files: |
+            dist/win11-triage-setup-*.exe
+            dist/win11-triage-portable-*.zip
           generate_release_notes: true

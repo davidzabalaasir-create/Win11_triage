@@ -37,12 +37,31 @@ SECTION_PROCESSES = "Procesos en ejecución — sospechosos"
 SECTION_EVENTS = "Eventos de Windows — servicios, tareas y Defender"
 
 
+APP_NAME = "win11-triage"
+
+
+def user_data_dir() -> Path:
+    """%LOCALAPPDATA%\\win11-triage (o ~/.win11-triage fuera de Windows)."""
+    base = os.environ.get("LOCALAPPDATA")
+    return Path(base) / APP_NAME if base else Path.home() / f".{APP_NAME}"
+
+
 def default_config_dir() -> Path:
-    """WIN11_TRIAGE_HOME > carpeta del .exe (PyInstaller) > carpeta actual."""
+    """Dónde viven .env, whitelist.json, la caché y los informes.
+
+    1. ``WIN11_TRIAGE_HOME`` si está definida.
+    2. Aplicación instalada (.exe): ``%LOCALAPPDATA%\\win11-triage``, porque «Archivos de programa»
+       no es escribible. Modo portable: si junto al .exe hay un ``portable.txt`` o un ``.env``,
+       se usa la carpeta del .exe.
+    3. Desde el código: la carpeta actual.
+    """
     if os.environ.get("WIN11_TRIAGE_HOME"):
         return Path(os.environ["WIN11_TRIAGE_HOME"]).resolve()
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+        exe_dir = Path(sys.executable).resolve().parent
+        if (exe_dir / "portable.txt").exists() or (exe_dir / ".env").exists():
+            return exe_dir
+        return user_data_dir()
     return Path.cwd().resolve()
 
 
@@ -62,6 +81,7 @@ class TriageOptions:
 
     def __post_init__(self) -> None:
         self.config_dir = (self.config_dir or default_config_dir()).resolve()
+        self.config_dir.mkdir(parents=True, exist_ok=True)
         if (self.vt or self.network or self.static) and not self.any_collector:
             self.autoruns = self.scan_user = True  # necesitan hallazgos de los que partir
 

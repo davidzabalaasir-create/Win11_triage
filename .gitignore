@@ -13,3 +13,4 @@ dist/
 *.spec
 gui_settings.json
 yara/
+packaging/version_info.txt

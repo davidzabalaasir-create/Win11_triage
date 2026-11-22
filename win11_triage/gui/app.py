@@ -620,6 +620,11 @@ class TriageApp(ctk.CTk):
             ("pefile (análisis PE)", pe_static.available(), None),
             ("YARA (opcional)", yara_scan.available(), None if yara_scan.available() else self.yara_help),
         ]
+        missing = [n for n, st in self.tools.items() if not st.found]
+        if missing and env_check.winget_available():
+            self._ui_small_button(
+                self.tools_frame, f"Instalar las {len(missing)} que faltan (winget)", self.install_missing
+            ).pack(fill="x", pady=(0, 6))
         for name, ok, fix in rows:
             row = ctk.CTkFrame(self.tools_frame, fg_color="transparent")
             row.pack(fill="x", pady=1)
@@ -633,6 +638,34 @@ class TriageApp(ctk.CTk):
                     row, text="Instalar", width=70, height=22, fg_color=CARD, hover_color=BORDER, command=fix
                 ).pack(side="right")
         self.update_vt_status()
+
+    def install_missing(self) -> None:
+        missing = [n for n, st in self.tools.items() if not st.found]
+        if not missing or (self.worker and self.worker.is_alive()):
+            return
+        if not messagebox.askyesno(
+            "Instalar herramientas",
+            "Se instalarán con winget (Microsoft Store/Sysinternals):\n\n"
+            + "\n".join(f"• {n}  ({env_check.TOOLS[n]['winget']})" for n in missing)
+            + "\n\nPuede tardar uno o dos minutos. ¿Continuar?",
+            parent=self,
+        ):
+            return
+
+        def work() -> None:
+            for n in missing:
+                self.events.put(("stage", f"Instalando {n} con winget…"))
+                ok, out = env_check.winget_install(n)
+                self.events.put(
+                    ("log", "INFO" if ok else "ERROR", f"winget {n}: {'instalada' if ok else 'falló'} {out}")
+                )
+            self.events.put(("done",))
+            self.events.put(("tools_refresh",))
+
+        self.worker = threading.Thread(target=work, daemon=True)
+        self.worker.start()
+        self.set_running(True)
+        self.run_btn.configure(text="Instalando…")
 
     def update_vt_status(self) -> None:
         has_key = os.environ.get("VT_API_KEY", "").strip() not in ("", PLACEHOLDER_KEY)
@@ -790,6 +823,18 @@ class TriageApp(ctk.CTk):
             self.set_status(f"Esperando el límite de VirusTotal: {ev[1]:4.1f} s…")
         elif kind == "result":
             self.finish(ev[1])
+        elif kind == "tools_refresh":
+            self.set_running(False)
+            self.refresh_tools()
+            ok = all(st.found for st in self.tools.values())
+            self.set_status(
+                "Herramientas instaladas." if ok else "Alguna herramienta no se pudo instalar: mira el Registro."
+            )
+            toast(
+                self,
+                "Herramientas listas." if ok else "Revisa la pestaña Registro.",
+                STATUS_COLOR[Status.CLEAN if ok else Status.UNKNOWN],
+            )
         elif kind == "cancelled":
             self.set_running(False)
             self.set_status("Análisis cancelado.")

@@ -59,3 +59,23 @@ def test_engine_skips_vt_without_key(tmp_path, monkeypatch):
     res = TriageEngine(TriageOptions(autoruns=True, vt=True, config_dir=tmp_path), tools).run()
     assert any("VT_API_KEY" in e for e in res.errors)
     assert res.vt_stats is None
+
+
+def test_default_config_dir_for_installed_and_portable_app(tmp_path, monkeypatch):
+    import sys
+
+    from win11_triage import engine
+
+    monkeypatch.delenv("WIN11_TRIAGE_HOME", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    exe_dir = tmp_path / "Program Files" / "win11-triage"
+    exe_dir.mkdir(parents=True)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(exe_dir / "win11-triage-gui.exe"))
+    # Instalada: datos en %LOCALAPPDATA% (Archivos de programa no es escribible)
+    assert engine.default_config_dir() == tmp_path / "local" / "win11-triage"
+    # Portable: junto al .exe
+    (exe_dir / "portable.txt").write_text("x")
+    assert engine.default_config_dir() == exe_dir
+    monkeypatch.setenv("WIN11_TRIAGE_HOME", str(tmp_path / "custom"))
+    assert engine.default_config_dir() == (tmp_path / "custom").resolve()
