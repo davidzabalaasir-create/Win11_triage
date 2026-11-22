@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
@@ -11,9 +12,9 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from rich.console import Console
 
 from . import __version__
+from .models import Cancelled
 
 log = logging.getLogger(__name__)
 
@@ -54,13 +55,17 @@ class VTClient:
         self,
         api_key: str,
         cache_file: Path,
-        console: Console,
         interval: float = FREE_TIER_INTERVAL,
         simulator: Callable[[str], VTResult] | None = None,
         persist: bool = True,
+        on_wait: Callable[[float], None] | None = None,
+        on_notice: Callable[[str], None] | None = None,
+        cancel: threading.Event | None = None,
     ) -> None:
         self.cache_file = cache_file
-        self.console = console
+        self.on_wait = on_wait or (lambda _remaining: None)
+        self.on_notice = on_notice or log.warning
+        self.cancel = cancel or threading.Event()
         self.interval = interval
         self.simulator = simulator
         self.persist = persist
@@ -78,7 +83,7 @@ class VTClient:
             data = json.loads(self.cache_file.read_text(encoding="utf-8") or "{}")
             return data if isinstance(data, dict) else {}
         except (OSError, json.JSONDecodeError):
-            self.console.print(f"[yellow]Caché ilegible ({self.cache_file.name}); se ignora.[/]")
+            self.on_notice(f"Caché ilegible ({self.cache_file.name}); se ignora.")
             return {}
 
     def cached(self, sha256: str) -> VTResult | None:
@@ -102,14 +107,20 @@ class VTClient:
         tmp.replace(self.cache_file)  # escritura atómica
 
     # ---------------------------------------------------------- rate limit
+    def _sleep(self, seconds: float) -> None:
+        """Espera interrumpible: informa del tiempo restante y respeta la cancelación."""
+        end = time.monotonic() + seconds
+        while (remaining := end - time.monotonic()) > 0:
+            if self.cancel.is_set():
+                raise Cancelled
+            self.on_wait(remaining)
+            time.sleep(min(0.25, remaining))
+
     def _wait_turn(self) -> None:
-        remaining = self.interval - (time.monotonic() - self._last_request)
-        if self._last_request and remaining > 0:
-            with self.console.status("") as status:
-                while remaining > 0:
-                    status.update(f"[cyan]Límite de VirusTotal: esperando {remaining:4.1f}s…")
-                    time.sleep(min(0.5, remaining))
-                    remaining = self.interval - (time.monotonic() - self._last_request)
+        if self._last_request:
+            self._sleep(self.interval - (time.monotonic() - self._last_request))
+        if self.cancel.is_set():
+            raise Cancelled
         self._last_request = time.monotonic()
 
     # ---------------------------------------------------------- consulta
@@ -126,8 +137,8 @@ class VTClient:
             if r.status_code in (401, 403):
                 raise VTAuthError(f"API key inválida o sin permisos (HTTP {r.status_code})")
             if r.status_code == 429 and attempt == 0:
-                self.console.print(f"[yellow]Cuota excedida (429). Esperando {RETRY_AFTER_429}s…[/]")
-                time.sleep(RETRY_AFTER_429)
+                self.on_notice(f"Cuota de VirusTotal excedida (429). Esperando {RETRY_AFTER_429}s…")
+                self._sleep(RETRY_AFTER_429)
                 self._last_request = time.monotonic()
                 continue
             return {"error": f"HTTP {r.status_code}"}

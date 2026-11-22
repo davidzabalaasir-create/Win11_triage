@@ -2,6 +2,23 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y [SemVer](https://semver.org/lang/es/).
 
+## [1.2.0] — 2026-11-22
+
+### Añadido
+- **Interfaz gráfica** (`win11-triage-gui` / `--gui`):
+  - tarjetas de resumen;
+  - tabla filtrable, ordenable y con búsqueda;
+  - detalle de cada elemento con acciones (VirusTotal, copiar hash, Explorador, lista blanca);
+  - pestañas de conexiones y registro;
+  - gestión de la API key, ayuda para instalar Sysinternals y reinicio como administrador;
+  - análisis en segundo plano con barra de progreso y cancelación.
+- Motor de triaje (`engine.py`) compartido por CLI y GUI.
+- Ejecutables `.exe` generados con PyInstaller en la CI y publicados en las releases.
+- Tests del motor y prueba de humo de la GUI.
+
+### Corregido
+- La plantilla de `whitelist.json` se modificaba en memoria al añadir entradas.
+
 ## [1.1.0] — 2026-11-22
 
 ### Añadido

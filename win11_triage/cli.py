@@ -1,39 +1,28 @@
-"""Punto de entrada de la CLI."""
+"""Interfaz de línea de comandos."""
 
 from __future__ import annotations
 
 import argparse
-import getpass
-import json
 import logging
-import os
-import platform
 import sys
-from collections.abc import Callable
-from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.panel import Panel
+from rich.status import Status as RichStatus
 
-from . import __version__, collectors, env_check, report
-from .models import Finding, Status
+from . import __version__, env_check, report
+from .engine import Reporter, TriageEngine, TriageOptions
+from .models import Cancelled, Finding, Status
 from .report import TriageResult
-from .virustotal import VTAuthError, VTClient, VTResult
-from .whitelist import Whitelist, WhitelistError
-
-SAMPLES = Path(__file__).resolve().parent / "samples"
-PLACEHOLDER_KEY = "pon_aqui_tu_api_key"
+from .virustotal import VTResult
+from .whitelist import WhitelistError
 
 EXIT_OK, EXIT_ENV, EXIT_DETECTED, EXIT_INTERRUPTED = 0, 1, 2, 130
 
-SECTION_AUTORUNS = "Persistencia (Autoruns) — no Microsoft / no verificado"
-SECTION_SIGCHECK = "Rutas de usuario (Sigcheck) — sin firma válida"
-
 console = Console(highlight=False)
-log = logging.getLogger("win11_triage")
 
 
 # ----------------------------------------------------------------- argumentos
@@ -55,6 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     mod.add_argument("--all", action="store_true", help="activa todos los módulos")
 
     opt = p.add_argument_group("opciones")
+    opt.add_argument("--gui", action="store_true", help="abre la interfaz gráfica")
     opt.add_argument(
         "--dry-run", action="store_true", help="usa datos de ejemplo: no ejecuta herramientas ni usa la red"
     )
@@ -62,7 +52,6 @@ def build_parser() -> argparse.ArgumentParser:
     opt.add_argument(
         "--config-dir",
         type=Path,
-        default=None,
         metavar="DIR",
         help="carpeta con .env, whitelist.json y vt_cache.json (por defecto: WIN11_TRIAGE_HOME o la actual)",
     )
@@ -75,7 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     opt.add_argument("--no-report", action="store_true", help="no exportar informe")
     opt.add_argument("--no-color", action="store_true", help="desactiva los colores")
     opt.add_argument(
-        "-v", "--verbose", action="store_true", help="muestra los comandos ejecutados y detalles de depuración"
+        "-v", "--verbose", action="store_true", help="muestra comandos ejecutados y detalles de depuración"
     )
     opt.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return p
@@ -88,14 +77,60 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         p.error("--vt-limit debe ser >= 0")
     if a.all or (a.dry_run and not (a.autoruns or a.scan_user or a.network or a.vt)):
         a.autoruns = a.scan_user = a.network = a.vt = True
-    if (a.vt or a.network) and not (a.autoruns or a.scan_user):
-        a.autoruns = a.scan_user = True  # VT y red necesitan hallazgos de los que partir
-    a.config_dir = (a.config_dir or Path(os.environ.get("WIN11_TRIAGE_HOME", Path.cwd()))).resolve()
+    a.options = TriageOptions(
+        autoruns=a.autoruns,
+        scan_user=a.scan_user,
+        network=a.network,
+        vt=a.vt,
+        dry_run=a.dry_run,
+        vt_limit=a.vt_limit,
+        config_dir=a.config_dir,
+    )
+    a.config_dir = a.options.config_dir
     a.output_dir = a.output_dir or a.config_dir / "reportes"
     return a
 
 
-# ----------------------------------------------------------------- entorno
+# ----------------------------------------------------------------- reporter
+class RichReporter(Reporter):
+    def __init__(self) -> None:
+        self._status: RichStatus | None = None
+
+    def stage(self, text: str) -> None:
+        if self._status is None:
+            self._status = console.status(text)
+            self._status.start()
+        else:
+            self._status.update(text)
+
+    def done(self) -> None:
+        if self._status is not None:
+            self._status.stop()
+            self._status = None
+
+    def info(self, text: str) -> None:
+        console.print(text)
+
+    def warn(self, text: str) -> None:
+        console.print(f"[yellow]{text}[/]")
+
+    def error(self, text: str) -> None:
+        console.print(f"[red]{text}[/]")
+
+    def vt_start(self, total: int, cached: int, new: int, eta: float) -> None:
+        extra = f" (≈{eta / 60:.1f} min)" if eta else ""
+        console.print(f"\nVirusTotal: {total} hashes únicos · {cached} en caché · {new} consultas nuevas{extra}")
+
+    def vt_progress(self, index: int, total: int, sha256: str, result: VTResult, origin: str) -> None:
+        self.done()
+        f = Finding("", "", "", "", "", "", vt=result)
+        console.print(f"  [{index}/{total}] {sha256[:16]}… → [{f.status.style}]{f.vt_summary}[/] [dim]({origin})[/]")
+
+    def vt_wait(self, remaining: float) -> None:
+        self.stage(f"[cyan]Límite de VirusTotal: esperando {remaining:4.1f}s…")
+
+
+# ----------------------------------------------------------------- salida
 def show_env(tools: dict[str, env_check.ToolStatus], needed: set[str], hints: bool = True) -> bool:
     console.print(report.env_table(tools))
     if not hints:
@@ -119,121 +154,6 @@ def show_env(tools: dict[str, env_check.ToolStatus], needed: set[str], hints: bo
     return ok
 
 
-# ----------------------------------------------------------------- dry-run
-def _sample(name: str) -> str:
-    return (SAMPLES / name).read_text(encoding="utf-8")
-
-
-def _dry_autoruns() -> list[Finding]:
-    # Se pasa por UTF-16 para ejercitar el mismo decodificador que con autorunsc real.
-    return collectors.parse_autoruns(collectors.decode_output(_sample("autorunsc_sample.csv").encode("utf-16")))
-
-
-def _dry_sigcheck() -> list[Finding]:
-    return collectors.parse_sigcheck(_sample("sigcheck_sample.csv"), "(muestra)")
-
-
-def _dry_vt_simulator() -> Callable[[str], VTResult]:
-    data = json.loads(_sample("vt_responses.json"))
-    return lambda h: dict(data.get(h, {"found": False}))
-
-
-# ----------------------------------------------------------------- módulos
-def run_autoruns(args: argparse.Namespace, res: TriageResult) -> list[Finding]:
-    if args.dry_run:
-        return _dry_autoruns()
-    with console.status("Ejecutando autorunsc (puede tardar varios minutos)…"):
-        return collectors.collect_autoruns(res.tools["autorunsc.exe"].path)  # type: ignore[arg-type]
-
-
-def run_sigcheck(args: argparse.Namespace, res: TriageResult) -> list[Finding]:
-    if args.dry_run:
-        return _dry_sigcheck()
-    found: list[Finding] = []
-    for folder in collectors.user_scan_targets():
-        if not folder.is_dir():
-            log.debug("Carpeta inexistente, se omite: %s", folder)
-            continue
-        with console.status(f"Ejecutando sigcheck sobre {folder}…"):
-            try:
-                found += collectors.collect_sigcheck(res.tools["sigcheck.exe"].path, folder)  # type: ignore[arg-type]
-            except collectors.CollectorError as e:
-                res.errors.append(str(e))
-                console.print(f"[red]{e}[/]")
-    return found
-
-
-def run_network(args: argparse.Namespace, res: TriageResult) -> None:
-    if args.dry_run:
-        conns = collectors.parse_tcpvcon(_sample("tcpvcon_sample.csv"))
-    else:
-        exe = res.tools["tcpvcon.exe"].path
-        if exe is None:
-            res.errors.append("tcpvcon.exe no encontrado: se omite --network")
-            return
-        try:
-            conns = collectors.collect_tcpvcon(exe)
-        except collectors.CollectorError as e:
-            res.errors.append(str(e))
-            console.print(f"[red]{e}[/]")
-            return
-    res.connections = conns
-    matched = collectors.correlate_connections(res.findings, conns)
-    console.print(f"Red: {len(conns)} conexiones activas · {matched} hallazgo(s) con conexiones.")
-
-
-def run_vt(args: argparse.Namespace, res: TriageResult) -> None:
-    api_key = os.environ.get("VT_API_KEY", "").strip()
-    if not args.dry_run and api_key in ("", PLACEHOLDER_KEY):
-        msg = "VT_API_KEY no definida en .env: se omite VirusTotal (ver .env.example)."
-        res.errors.append(msg)
-        console.print(f"[yellow]{msg}[/]")
-        return
-
-    client = VTClient(
-        api_key=api_key or "dry-run",
-        cache_file=args.config_dir / "vt_cache.json",
-        console=console,
-        interval=0 if args.dry_run else 15,
-        simulator=_dry_vt_simulator() if args.dry_run else None,
-        persist=not args.dry_run,
-    )
-    hashes = sorted({f.sha256 for f in res.findings if f.sha256})
-    pending = [h for h in hashes if not client.cached(h)]
-    limit = len(pending) if args.vt_limit is None else min(args.vt_limit, len(pending))
-    eta = max(0, limit - 1) * client.interval
-    console.print(
-        f"\nVirusTotal: {len(hashes)} hashes únicos · {len(hashes) - len(pending)} en caché · "
-        f"{limit} consultas nuevas" + (f" (≈{eta / 60:.1f} min)" if eta else "")
-    )
-
-    results: dict[str, VTResult] = {}
-    new_queries = 0
-    try:
-        for i, h in enumerate(hashes, 1):
-            if h in pending:
-                if new_queries >= limit:
-                    client.stats["skipped"] += 1
-                    continue
-                new_queries += 1
-            r = client.lookup(h)
-            results[h] = r
-            origin = "caché" if r.get("cached") else ("simulado" if args.dry_run else "API")
-            summary = Finding("", "", "", "", "", "", vt=r)
-            console.print(
-                f"  [{i}/{len(hashes)}] {h[:16]}… → [{summary.status.style}]{summary.vt_summary}[/] [dim]({origin})[/]"
-            )
-    except VTAuthError as e:
-        res.errors.append(f"VirusTotal: {e}")
-        console.print(f"[red]VirusTotal: {e}[/]")
-    finally:
-        client.save()
-        for f in res.findings:
-            f.vt = results.get(f.sha256, f.vt)
-        res.vt_stats = client.stats
-
-
-# ----------------------------------------------------------------- salida
 def print_results(res: TriageResult) -> None:
     console.print()
     for title, fs in res.sections.items():
@@ -260,80 +180,51 @@ def setup_logging(verbose: bool) -> None:
         level=logging.DEBUG if verbose else logging.WARNING,
         format="%(message)s",
         handlers=[RichHandler(console=console, show_time=False, show_path=False)],
+        force=True,
     )
 
 
 # ----------------------------------------------------------------- main
 def run(args: argparse.Namespace) -> int:
-    load_dotenv(args.config_dir / ".env")
-    console.rule(f"[bold cyan]win11-triage {__version__}[/]" + ("  [yellow](DRY-RUN)[/]" if args.dry_run else ""))
+    opts: TriageOptions = args.options
+    load_dotenv(opts.config_dir / ".env")  # type: ignore[operator]
+    console.rule(f"[bold cyan]win11-triage {__version__}[/]" + ("  [yellow](DRY-RUN)[/]" if opts.dry_run else ""))
 
     windows, admin = env_check.is_windows(), env_check.is_admin()
-    if not windows and not args.dry_run:
+    if not windows and not opts.dry_run:
         console.print("[yellow]Este sistema no es Windows: solo --dry-run es funcional aquí.[/]")
-    elif windows and not admin and not args.dry_run:
+    elif windows and not admin and not opts.dry_run:
         console.print("[yellow]Sin privilegios de administrador: autoruns no verá todas las ubicaciones.[/]")
 
-    needed = {n for n, flag in (("autorunsc.exe", args.autoruns), ("sigcheck.exe", args.scan_user)) if flag}
     tools = env_check.check_all()
-    env_ok = show_env(tools, needed, hints=not args.dry_run)
+    needed = {n for n, on in (("autorunsc.exe", opts.autoruns), ("sigcheck.exe", opts.scan_user)) if on}
+    env_ok = show_env(tools, needed, hints=not opts.dry_run)
 
-    if not (args.autoruns or args.scan_user):
+    if not opts.any_collector:
         console.print(
-            "\nElige un módulo: [bold]--autoruns[/], [bold]--scan-user[/], [bold]--network[/], [bold]--vt[/] o [bold]--all[/] (ayuda: --help)."
+            "\nElige un módulo: [bold]--autoruns[/], [bold]--scan-user[/], [bold]--network[/], "
+            "[bold]--vt[/] o [bold]--all[/]. También: [bold]--gui[/] (ayuda: --help)."
         )
         return EXIT_OK if env_ok else EXIT_ENV
-    if not args.dry_run and not (env_ok and windows):
+    if not opts.dry_run and not (env_ok and windows):
         console.print("[red]No se puede continuar: faltan herramientas necesarias.[/]")
         return EXIT_ENV
 
+    reporter = RichReporter()
     try:
-        wl_file = SAMPLES / "whitelist_sample.json" if args.dry_run else args.config_dir / "whitelist.json"
-        whitelist = Whitelist.load(wl_file, create=not args.dry_run)
+        res = TriageEngine(opts, tools, reporter).run()
     except WhitelistError as e:
         console.print(f"[red]{e}[/]")
         return EXIT_ENV
-
-    res = TriageResult(
-        host=platform.node() or "host",
-        user=getpass.getuser(),
-        started=datetime.now(),
-        dry_run=args.dry_run,
-        admin=admin,
-        tools=tools,
-    )
-
-    collectors_to_run = (
-        ("autoruns", args.autoruns, SECTION_AUTORUNS, run_autoruns),
-        ("scan-user", args.scan_user, SECTION_SIGCHECK, run_sigcheck),
-    )
-    for module, enabled, section, fn in collectors_to_run:
-        if not enabled:
-            continue
-        res.modules.append(module)
-        try:
-            found = fn(args, res)
-        except collectors.CollectorError as e:
-            res.errors.append(str(e))
-            console.print(f"[red]{e}[/]")
-            found = []
-        found, skipped = whitelist.filter(found)
-        res.whitelisted += skipped
-        res.sections[section] = found
-
-    if args.network:
-        res.modules.append("network")
-        run_network(args, res)
-    if args.vt:
-        res.modules.append("vt")
-        run_vt(args, res)
+    finally:
+        reporter.done()
 
     print_results(res)
     if not args.no_report:
         for path in report.write_reports(res, args.output_dir, args.format):
             console.print(f"[bold]Informe:[/] {path}")
 
-    if args.dry_run:
+    if opts.dry_run:
         return EXIT_OK  # el dry-run solo valida la estructura
     return EXIT_DETECTED if res.counts()[Status.DETECTED] else EXIT_OK
 
@@ -345,12 +236,16 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
     args = parse_args(argv)
+    if args.gui:
+        from .gui import main as gui_main
+
+        return gui_main(args.config_dir)
     if args.no_color:
         console = Console(no_color=True, highlight=False)
     setup_logging(args.verbose)
     try:
         return run(args)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, Cancelled):
         console.print("\n[yellow]Interrumpido por el usuario.[/]")
         return EXIT_INTERRUPTED
 

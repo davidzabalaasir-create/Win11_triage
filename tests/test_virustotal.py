@@ -3,7 +3,6 @@ from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 import pytest
-from rich.console import Console
 
 from win11_triage import virustotal
 from win11_triage.virustotal import VTAuthError, VTClient
@@ -18,7 +17,7 @@ def _resp(code, malicious=0):
 
 @pytest.fixture
 def client(tmp_path):
-    return VTClient("k", tmp_path / "vt_cache.json", Console(quiet=True), interval=0.2)
+    return VTClient("k", tmp_path / "vt_cache.json", interval=0.2)
 
 
 def test_cache_dedupes_and_persists(client):
@@ -69,4 +68,24 @@ def test_not_found_expires_after_ttl(client):
 def test_corrupt_cache_is_ignored(tmp_path):
     cache = tmp_path / "vt_cache.json"
     cache.write_text("{no json")
-    assert VTClient("k", cache, Console(quiet=True)).cache == {}
+    assert VTClient("k", cache).cache == {}
+
+
+def test_cancel_interrupts_rate_limit_wait(client):
+    from win11_triage.models import Cancelled
+
+    client.interval = 30
+    with mock.patch.object(client.session, "get", return_value=_resp(404)):
+        client.lookup("1" * 64)
+        client.cancel.set()
+        with pytest.raises(Cancelled):
+            client.lookup("2" * 64)
+
+
+def test_wait_reports_remaining_time(client):
+    seen = []
+    client.on_wait = seen.append
+    with mock.patch.object(client.session, "get", return_value=_resp(404)):
+        client.lookup("1" * 64)
+        client.lookup("2" * 64)
+    assert seen and all(0 < s <= client.interval for s in seen)

@@ -23,7 +23,7 @@ def test_dry_run_enables_all_modules(tmp_path):
 
 def test_vt_implies_collectors(tmp_path):
     a = cli.parse_args(["--vt", "--config-dir", str(tmp_path)])
-    assert a.autoruns and a.scan_user and not a.network
+    assert a.options.autoruns and a.options.scan_user and not a.options.network
 
 
 def test_negative_vt_limit_rejected():

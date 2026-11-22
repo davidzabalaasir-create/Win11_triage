@@ -87,18 +87,22 @@ def findings_table(title: str, findings: list[Finding]) -> Table:
     return t
 
 
-def connections_table(findings: list[Finding]) -> Table:
-    """Una fila por conexión; si varios hallazgos comparten proceso, gana el peor veredicto."""
+def unique_connections(findings: list[Finding]) -> list[tuple[Connection, Status]]:
+    """Una entrada por conexión; si varios hallazgos comparten proceso, gana el peor veredicto."""
     worst: dict[tuple[str, ...], tuple[Connection, Status]] = {}
     for f in findings:
         for c in f.connections:
             key = (c.protocol, c.pid, c.local, c.remote)
             if key not in worst or f.status.rank < worst[key][1].rank:
                 worst[key] = (c, f.status)
+    return sorted(worst.values(), key=lambda x: (x[1].rank, x[0].process, x[0].remote))
+
+
+def connections_table(findings: list[Finding]) -> Table:
     t = Table(title="Conexiones activas de procesos señalados", title_style="bold", title_justify="left")
     for col in ("Proceso", "PID", "Proto", "Estado", "Local", "Remoto", "Veredicto"):
         t.add_column(col, overflow="fold")
-    for c, st in sorted(worst.values(), key=lambda x: (x[1].rank, x[0].process, x[0].remote)):
+    for c, st in unique_connections(findings):
         t.add_row(c.process, c.pid, c.protocol, c.state, c.local, c.remote, f"[{st.style}]{st.value}[/]")
     return t
 

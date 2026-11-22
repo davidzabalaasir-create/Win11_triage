@@ -8,6 +8,10 @@ from pathlib import PureWindowsPath
 from typing import Any
 
 
+class Cancelled(Exception):
+    """El usuario canceló el análisis."""
+
+
 class Status(str, Enum):
     """Veredicto final de un hallazgo. El orden define la prioridad de presentación."""
 

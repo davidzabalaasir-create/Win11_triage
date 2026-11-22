@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import fnmatch
 import json
 from pathlib import Path
@@ -59,3 +60,20 @@ class Whitelist:
     def filter(self, findings: list[Finding]) -> tuple[list[Finding], int]:
         kept = [f for f in findings if not self.matches(f)]
         return kept, len(findings) - len(kept)
+
+
+def add_to_whitelist(file: Path, *, path: str = "", sha256: str = "") -> bool:
+    """Añade una ruta o un hash a ``whitelist.json``. Devuelve False si ya estaba."""
+    data = copy.deepcopy(TEMPLATE)
+    if file.exists():
+        data = json.loads(file.read_text(encoding="utf-8") or "{}")
+    data.setdefault("paths", [])
+    data.setdefault("hashes", [])
+    key, value = ("paths", path.strip()) if path else ("hashes", sha256.strip().lower())
+    if not value:
+        raise ValueError("Indica una ruta o un hash")
+    if value.lower() in (v.lower() for v in data[key]):
+        return False
+    data[key].append(value)
+    file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    return True

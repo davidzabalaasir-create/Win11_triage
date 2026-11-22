@@ -9,7 +9,7 @@ description = "Triaje defensivo de Windows 11: persistencia, binarios sin firma 
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
-dependencies = ["rich>=13.7", "requests>=2.31", "python-dotenv>=1.0"]
+dependencies = ["rich>=13.7", "requests>=2.31", "python-dotenv>=1.0", "customtkinter>=5.2"]
 keywords = ["dfir", "blue-team", "windows", "sysinternals", "virustotal", "incident-response"]
 classifiers = [
     "Environment :: Console",
@@ -21,9 +21,13 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
+build = ["pyinstaller>=6.6"]
 
 [project.scripts]
 win11-triage = "win11_triage.cli:main"
+
+[project.gui-scripts]
+win11-triage-gui = "win11_triage.gui:main"
 
 [project.urls]
 Repository = "https://github.com/davidzabalaasir-create/Win11_triage"

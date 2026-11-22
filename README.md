@@ -7,7 +7,9 @@
 
 Herramienta de **triaje defensivo** para Windows 11. Revisa la persistencia del sistema y los ejecutables de las carpetas de usuario con Sysinternals, consulta su reputación en VirusTotal y genera un informe listo para adjuntar a un ticket.
 
-![Demo de win11-triage](docs/demo.svg)
+Se usa de dos formas: con una **interfaz gráfica** o desde la **línea de comandos**.
+
+![Interfaz gráfica de win11-triage](docs/gui.png)
 
 ## Qué hace
 
@@ -31,6 +33,20 @@ Cada elemento recibe un veredicto:
 
 ## Instalación
 
+### Opción A: ejecutable (sin Python)
+
+Descarga `win11-triage-gui.exe` (interfaz) o `win11-triage.exe` (consola) desde [Releases](https://github.com/davidzabalaasir-create/Win11_triage/releases) o desde los artefactos de la última ejecución de [CI](https://github.com/davidzabalaasir-create/Win11_triage/actions). El `.env`, `whitelist.json`, la caché y los informes se guardan junto al `.exe`.
+
+Solo necesitas además las herramientas de Sysinternals:
+
+```powershell
+winget install --id Microsoft.Sysinternals.Autoruns -e
+winget install --id Microsoft.Sysinternals.Sigcheck -e
+winget install --id Microsoft.Sysinternals.TCPView -e
+```
+
+### Opción B: desde el código
+
 Requisitos: Windows 10/11, Python 3.10+ y las herramientas de Sysinternals.
 
 ```powershell
@@ -47,7 +63,31 @@ copy .env.example .env   # y pega tu VT_API_KEY
 
 La herramienta busca los `.exe` en `SYSINTERNALS_DIR` (si lo defines en `.env`), en el `PATH` y en la carpeta de WinGet (`%LOCALAPPDATA%\Microsoft\WinGet`). Si falta alguno, muestra cómo instalarlo.
 
-## Uso
+## Interfaz gráfica
+
+```powershell
+win11-triage-gui          # o: win11-triage --gui · o doble clic en win11-triage-gui.pyw
+```
+
+- **Panel izquierdo**:
+  - módulos a ejecutar y modo demostración;
+  - límite de consultas a VirusTotal y formato del informe;
+  - estado de las herramientas de Sysinternals, con el comando `winget` para instalar las que falten.
+- **Tarjetas de resumen**: detectados, desconocidos, limpios y en lista blanca.
+- **Tabla de hallazgos**: filtros por estado, búsqueda y orden al pulsar cada columna. Doble clic abre el informe de VirusTotal.
+- **Panel de detalle** del elemento seleccionado, con acciones:
+  - abrir en VirusTotal;
+  - copiar el SHA-256;
+  - mostrarlo en el Explorador;
+  - **ignorar su ruta o su hash** (se añade a `whitelist.json`).
+- **Pestañas Conexiones y Registro**: conexiones activas de los procesos señalados y log de la ejecución.
+- **Botones extra**: «Clave de VirusTotal…» guarda la API key en `.env` sin mostrarla y «Reiniciar como administrador» la reabre elevada.
+
+El análisis corre en segundo plano: la ventana no se bloquea y se puede **cancelar** en cualquier momento, también durante la espera entre consultas a VirusTotal.
+
+## Línea de comandos
+
+![Demo de la CLI](docs/demo.svg)
 
 Abre la consola **como administrador** (sin elevación, autoruns no ve todas las ubicaciones):
 
@@ -135,9 +175,13 @@ ruff check . && ruff format --check .
 python scripts/make_demo.py   # regenera docs/demo.svg
 ```
 
+Ejecutables (en Windows): `powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1`. La CI los compila en cada cambio y los adjunta a la release al publicar un tag `v*`.
+
 ```
 win11_triage/
-├── cli.py          # argumentos y orquestación
+├── engine.py       # motor de triaje compartido por CLI y GUI
+├── gui.py          # interfaz gráfica (CustomTkinter)
+├── cli.py          # línea de comandos (Rich)
 ├── env_check.py    # localización de Sysinternals y privilegios
 ├── collectors.py   # ejecución y parseo de autorunsc / sigcheck / tcpvcon
 ├── virustotal.py   # cliente VT v3 con caché y límite de tasa

@@ -6,6 +6,8 @@ import ctypes
 import os
 import platform
 import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -112,3 +114,15 @@ def install_hint(name: str) -> str:
         f"o descarga manual: {info['url']}\n"
         "(añade la carpeta al PATH o define SYSINTERNALS_DIR en .env)"
     )
+
+
+def relaunch_as_admin(args: list[str]) -> bool:
+    """Reabre el programa elevado (UAC). Devuelve True si Windows aceptó lanzarlo."""
+    if not is_windows():
+        return False
+    if getattr(sys, "frozen", False):
+        exe, params = sys.executable, subprocess.list2cmdline(args)
+    else:
+        exe, params = sys.executable, subprocess.list2cmdline(["-m", "win11_triage.gui", *args])
+    rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, None, 1)  # type: ignore[attr-defined]
+    return int(rc) > 32

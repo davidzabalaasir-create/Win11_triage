@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -35,6 +36,40 @@ jobs:
           python-version: ${{ matrix.python }}
           cache: pip
       - run: pip install -e ".[dev]"
-      - run: pytest -q
+      - name: Tests (Windows)
+        if: runner.os == 'Windows'
+        run: pytest -q
+      - name: Tests (Linux, con pantalla virtual para la GUI)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q xvfb
+          xvfb-run -a pytest -q
       - name: Dry-run de humo
         run: win11-triage --dry-run --no-color --format both --config-dir .
+
+  build-exe:
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: write  # solo para adjuntar los .exe a la release en tags v*
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Compilar ejecutables
+        shell: pwsh
+        run: ./scripts/build_exe.ps1
+      - name: Probar el ejecutable de consola
+        run: dist\win11-triage.exe --dry-run --no-color --no-report
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win11-triage-windows
+          path: dist/*.exe
+      - name: Publicar release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+          generate_release_notes: true

@@ -48,3 +48,16 @@ def test_expand_win_vars_is_case_insensitive_and_keeps_unknown(monkeypatch):
     monkeypatch.setenv("WINDIR", "C:\\Windows")
     assert expand_win_vars("%windir%\\x.exe") == "C:\\Windows\\x.exe"
     assert expand_win_vars("%NO_EXISTE_XYZ%\\a") == "%NO_EXISTE_XYZ%\\a"
+
+
+def test_add_to_whitelist_dedupes(tmp_path):
+    from win11_triage.whitelist import add_to_whitelist
+
+    p = tmp_path / "whitelist.json"
+    assert add_to_whitelist(p, path="C:\\a.exe") is True
+    assert add_to_whitelist(p, path="c:\\A.EXE") is False
+    assert add_to_whitelist(p, sha256="ABC") is True
+    data = json.loads(p.read_text())
+    assert data["paths"] == ["C:\\a.exe"] and data["hashes"] == ["abc"]
+    with pytest.raises(ValueError):
+        add_to_whitelist(p)
