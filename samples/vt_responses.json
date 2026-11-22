@@ -1,0 +1,7 @@
+{
+  "_comment": "Respuestas simuladas de VirusTotal usadas solo en --dry-run.",
+  "bbdefa2950f49882f295b1285d4fa9dec45fc4144bfb07ee6acc68762d12c2e3": {"found": true, "malicious": 0, "suspicious": 0, "harmless": 0, "undetected": 72, "total": 72, "label": ""},
+  "196c23750e800642e7c008dc0416536449f295069c8161c23283c86334f8d251": {"found": true, "malicious": 23, "suspicious": 2, "harmless": 0, "undetected": 47, "total": 72, "label": "trojan.agent/demo"},
+  "0ebb429fa86d481c2630fac53db1c91cffed5d4d41d1021c179444eb67e7ee0b": {"found": true, "malicious": 5, "suspicious": 0, "harmless": 0, "undetected": 67, "total": 72, "label": "downloader.generic"},
+  "e81d3b0e9d82feaaf5f6e55bdff24731d7eee08632ffa63801e6397290c5d20a": {"found": true, "malicious": 0, "suspicious": 0, "harmless": 0, "undetected": 70, "total": 70, "label": ""}
+}

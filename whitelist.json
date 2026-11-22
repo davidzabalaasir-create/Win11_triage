@@ -1,0 +1,5 @@
+{
+  "_comment": "Rutas (admiten comodines * y variables %VAR%) y hashes SHA-256 que consideras seguros. Se ignoran en el análisis.",
+  "paths": [],
+  "hashes": []
+}

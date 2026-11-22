@@ -1,0 +1,6 @@
+.env
+vt_cache.json
+reportes/
+__pycache__/
+*.pyc
+.venv/

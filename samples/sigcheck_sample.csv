@@ -1,0 +1,4 @@
+Path,Verified,Date,Publisher,Company,Description,Product,Product Version,File Version,Machine Type,MD5,SHA1,PESHA1,PESHA256,SHA256,IMP
+"C:\Users\usuario\AppData\Local\Temp\setup_tmp.exe","Unsigned","8:12 21/11/2026","n/a","n/a","n/a","n/a","n/a","n/a","64-bit","","","","","cf10d3eb4b80f1fdd74306ab6e6152f1822b19451b959eba448ba2d0b2beb22b",""
+"C:\Users\usuario\AppData\Roaming\Helper\helper.dll","Unsigned","14:30 01/11/2026","n/a","Helper Inc","Helper library","Helper","1.0","1.0","32-bit","","","","","e81d3b0e9d82feaaf5f6e55bdff24731d7eee08632ffa63801e6397290c5d20a",""
+"C:\Users\usuario\AppData\Local\Temp\upd.exe","The digital signature of the object did not verify.","19/11/2026","n/a","n/a","n/a","n/a","n/a","n/a","64-bit","","","","","0ebb429fa86d481c2630fac53db1c91cffed5d4d41d1021c179444eb67e7ee0b",""
