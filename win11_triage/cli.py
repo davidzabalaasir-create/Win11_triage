@@ -59,7 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir", type=Path, metavar="DIR", help="carpeta de informes (por defecto: <config-dir>/reportes)"
     )
     opt.add_argument(
-        "--format", choices=("md", "json", "both"), default="md", help="formato del informe (por defecto: md)"
+        "--format",
+        choices=report.FORMAT_CHOICES,
+        default="md",
+        help="formato del informe: md, html, json, both (md+json) o all (por defecto: md)",
     )
     opt.add_argument("--no-report", action="store_true", help="no exportar informe")
     opt.add_argument("--no-color", action="store_true", help="desactiva los colores")

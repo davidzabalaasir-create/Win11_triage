@@ -5,6 +5,8 @@ python -m pip install -e ".[build]"
 
 $common = @("--noconfirm", "--onefile", "--clean",
             "--add-data", "win11_triage/samples;win11_triage/samples",
+            "--add-data", "win11_triage/assets;win11_triage/assets",
+            "--icon", "win11_triage/assets/icon.ico",
             "--collect-data", "customtkinter")
 
 pyinstaller @common --windowed --name win11-triage-gui win11-triage-gui.pyw

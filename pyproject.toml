@@ -39,7 +39,7 @@ version = { attr = "win11_triage.__version__" }
 include = ["win11_triage*"]
 
 [tool.setuptools.package-data]
-win11_triage = ["samples/*"]
+win11_triage = ["samples/*", "assets/*"]
 
 [tool.ruff]
 line-length = 120

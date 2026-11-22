@@ -67,11 +67,12 @@ Principios de diseño:
 ```python
 @dataclass(frozen=True)
 class Signal:
-    id: str            # "PERSIST_USER_WRITABLE_PATH"
-    title: str         # texto para el informe, en español
-    weight: int        # 0–100, se suman con saturación
-    attack: str = ""   # "T1547.001"
-    evidence: str = "" # fragmento concreto que disparó la regla
+    id: str  # "PERSIST_USER_WRITABLE_PATH"
+    title: str  # texto para el informe, en español
+    weight: int  # 0–100, se suman con saturación
+    attack: str = ""  # "T1547.001"
+    evidence: str = ""  # fragmento concreto que disparó la regla
+
 
 # Finding gana: pid, ppid, parent_name, cmdline, created (datetime), signals: list[Signal]
 # Finding.score = min(100, sum(weights)) ; el veredicto combina score y VT (ver Decisión D3)
@@ -87,6 +88,7 @@ class Signal:
 
 ```python
 """Reglas puras sobre un Finding. Cada una devuelve Signal o None."""
+
 from __future__ import annotations
 
 import difflib
@@ -104,30 +106,87 @@ USER_WRITABLE = re.compile(
 
 # LOLBins usados como lanzadera (proxy execution / descarga). Patrón → (id, título, ATT&CK, peso)
 LOLBIN_PATTERNS: list[tuple[re.Pattern[str], str, str, str, int]] = [
-    (re.compile(r"powershell(\.exe)?\b.*\s-e(nc(odedcommand)?)?\s+[A-Za-z0-9+/=]{40,}", re.I),
-     "CMD_PS_ENCODED", "PowerShell con comando codificado en Base64", "T1059.001", 45),
-    (re.compile(r"powershell(\.exe)?\b.*(downloadstring|downloadfile|invoke-webrequest|\biwr\b|net\.webclient)", re.I),
-     "CMD_PS_DOWNLOAD", "PowerShell descarga contenido de Internet", "T1105", 40),
-    (re.compile(r"powershell(\.exe)?\b.*\s-w(indowstyle)?\s+h(idden)?\b", re.I),
-     "CMD_PS_HIDDEN", "PowerShell en ventana oculta", "T1564.003", 20),
-    (re.compile(r"mshta(\.exe)?\W+.*(https?:|javascript:|vbscript:)", re.I),
-     "CMD_MSHTA_REMOTE", "mshta ejecuta script remoto o en línea", "T1218.005", 50),
-    (re.compile(r"regsvr32(\.exe)?\W+.*/i:\s*https?:", re.I),
-     "CMD_REGSVR32_SCT", "regsvr32 carga scriptlet remoto (Squiblydoo)", "T1218.010", 55),
-    (re.compile(r"rundll32(\.exe)?\W+.*(javascript:|https?:|\\\\[^\\]+\\)", re.I),
-     "CMD_RUNDLL32_ABUSE", "rundll32 con script, URL o ruta UNC", "T1218.011", 45),
-    (re.compile(r"certutil(\.exe)?\W+.*-(urlcache|decode|decodehex)\b", re.I),
-     "CMD_CERTUTIL", "certutil usado para descargar o decodificar", "T1140", 45),
-    (re.compile(r"bitsadmin(\.exe)?\W+.*/(transfer|addfile)\b", re.I),
-     "CMD_BITSADMIN", "bitsadmin descarga ficheros", "T1197", 35),
-    (re.compile(r"(wscript|cscript)(\.exe)?\W+.*\.(js|jse|vbs|vbe|wsf)\b", re.I),
-     "CMD_WSH_SCRIPT", "Windows Script Host ejecuta un script", "T1059.005", 20),
+    (
+        re.compile(r"powershell(\.exe)?\b.*\s-e(nc(odedcommand)?)?\s+[A-Za-z0-9+/=]{40,}", re.I),
+        "CMD_PS_ENCODED",
+        "PowerShell con comando codificado en Base64",
+        "T1059.001",
+        45,
+    ),
+    (
+        re.compile(
+            r"powershell(\.exe)?\b.*(downloadstring|downloadfile|invoke-webrequest|\biwr\b|net\.webclient)", re.I
+        ),
+        "CMD_PS_DOWNLOAD",
+        "PowerShell descarga contenido de Internet",
+        "T1105",
+        40,
+    ),
+    (
+        re.compile(r"powershell(\.exe)?\b.*\s-w(indowstyle)?\s+h(idden)?\b", re.I),
+        "CMD_PS_HIDDEN",
+        "PowerShell en ventana oculta",
+        "T1564.003",
+        20,
+    ),
+    (
+        re.compile(r"mshta(\.exe)?\W+.*(https?:|javascript:|vbscript:)", re.I),
+        "CMD_MSHTA_REMOTE",
+        "mshta ejecuta script remoto o en línea",
+        "T1218.005",
+        50,
+    ),
+    (
+        re.compile(r"regsvr32(\.exe)?\W+.*/i:\s*https?:", re.I),
+        "CMD_REGSVR32_SCT",
+        "regsvr32 carga scriptlet remoto (Squiblydoo)",
+        "T1218.010",
+        55,
+    ),
+    (
+        re.compile(r"rundll32(\.exe)?\W+.*(javascript:|https?:|\\\\[^\\]+\\)", re.I),
+        "CMD_RUNDLL32_ABUSE",
+        "rundll32 con script, URL o ruta UNC",
+        "T1218.011",
+        45,
+    ),
+    (
+        re.compile(r"certutil(\.exe)?\W+.*-(urlcache|decode|decodehex)\b", re.I),
+        "CMD_CERTUTIL",
+        "certutil usado para descargar o decodificar",
+        "T1140",
+        45,
+    ),
+    (
+        re.compile(r"bitsadmin(\.exe)?\W+.*/(transfer|addfile)\b", re.I),
+        "CMD_BITSADMIN",
+        "bitsadmin descarga ficheros",
+        "T1197",
+        35,
+    ),
+    (
+        re.compile(r"(wscript|cscript)(\.exe)?\W+.*\.(js|jse|vbs|vbe|wsf)\b", re.I),
+        "CMD_WSH_SCRIPT",
+        "Windows Script Host ejecuta un script",
+        "T1059.005",
+        20,
+    ),
 ]
 
 # Binarios de sistema que solo deberían existir en System32/SysWOW64 (o \Windows para explorer).
 SYSTEM_NAMES = {
-    "svchost.exe", "lsass.exe", "csrss.exe", "winlogon.exe", "services.exe", "smss.exe",
-    "wininit.exe", "rundll32.exe", "taskhostw.exe", "dllhost.exe", "conhost.exe", "spoolsv.exe",
+    "svchost.exe",
+    "lsass.exe",
+    "csrss.exe",
+    "winlogon.exe",
+    "services.exe",
+    "smss.exe",
+    "wininit.exe",
+    "rundll32.exe",
+    "taskhostw.exe",
+    "dllhost.exe",
+    "conhost.exe",
+    "spoolsv.exe",
 }
 SYSTEM_DIRS = re.compile(r"^[a-z]:\\windows\\(system32|syswow64|winsxs)\\", re.I)
 DOUBLE_EXT = re.compile(r"\.(pdf|docx?|xlsx?|jpe?g|png|txt|zip)\.(exe|scr|com|bat|cmd|js|vbs|lnk)$", re.I)
@@ -139,8 +198,7 @@ def _cmd(f: Finding) -> str:
 
 def user_writable_path(f: Finding) -> Signal | None:
     if USER_WRITABLE.search(f.path or ""):
-        return Signal("PATH_USER_WRITABLE", "Ejecutable en carpeta escribible por el usuario",
-                      20, "T1036", f.path)
+        return Signal("PATH_USER_WRITABLE", "Ejecutable en carpeta escribible por el usuario", 20, "T1036", f.path)
     return None
 
 
@@ -160,7 +218,7 @@ def masquerading(f: Finding) -> Signal | None:
     if name in SYSTEM_NAMES and not SYSTEM_DIRS.match(f.path.strip('"')):
         return Signal("MASQ_SYSTEM_NAME", f"{name} fuera de System32", 60, "T1036.005", f.path)
     close = difflib.get_close_matches(name, SYSTEM_NAMES, n=1, cutoff=0.85)
-    if close and close[0] != name:   # scvhost.exe, svch0st.exe, lsas.exe…
+    if close and close[0] != name:  # scvhost.exe, svch0st.exe, lsas.exe…
         return Signal("MASQ_TYPOSQUAT", f"Nombre parecido a {close[0]}", 50, "T1036.005", name)
     if DOUBLE_EXT.search(name):
         return Signal("MASQ_DOUBLE_EXT", "Doble extensión engañosa", 45, "T1036.007", name)
@@ -172,19 +230,19 @@ def masquerading(f: Finding) -> Signal | None:
 ```python
 # Categoría de autorunsc → (técnica ATT&CK, peso base). Lo raro pesa más.
 PERSISTENCE_WEIGHT = {
-    "Logon":             ("T1547.001", 5),   # Run/RunOnce/Startup: muy común
-    "Tasks":             ("T1053.005", 10),
-    "Services":          ("T1543.003", 10),
-    "Drivers":           ("T1543.003", 15),
-    "WMI":               ("T1546.003", 40),  # suscripciones WMI: casi nunca legítimas en un PC
-    "Image Hijacks":     ("T1546.012", 40),  # IFEO Debugger / SilentProcessExit
-    "Winlogon":          ("T1547.004", 30),
-    "AppInit":           ("T1546.010", 35),
-    "Explorer":          ("T1546.015", 10),  # incluye COM hijack en HKCU
-    "LSA Providers":     ("T1547.002", 40),
-    "Print Monitors":    ("T1547.010", 35),
-    "Boot Execute":      ("T1547.001", 35),
-    "Office":            ("T1137", 25),
+    "Logon": ("T1547.001", 5),  # Run/RunOnce/Startup: muy común
+    "Tasks": ("T1053.005", 10),
+    "Services": ("T1543.003", 10),
+    "Drivers": ("T1543.003", 15),
+    "WMI": ("T1546.003", 40),  # suscripciones WMI: casi nunca legítimas en un PC
+    "Image Hijacks": ("T1546.012", 40),  # IFEO Debugger / SilentProcessExit
+    "Winlogon": ("T1547.004", 30),
+    "AppInit": ("T1546.010", 35),
+    "Explorer": ("T1546.015", 10),  # incluye COM hijack en HKCU
+    "LSA Providers": ("T1547.002", 40),
+    "Print Monitors": ("T1547.010", 35),
+    "Boot Execute": ("T1547.001", 35),
+    "Office": ("T1137", 25),
     "Network Providers": ("T1556.008", 35),
 }
 ```
@@ -193,14 +251,29 @@ PERSISTENCE_WEIGHT = {
 
 ```python
 """Procesos en ejecución y conexiones con PID → ruta real (sustituye la correlación por nombre)."""
+
 import psutil
 
 OFFICE = {"winword.exe", "excel.exe", "powerpnt.exe", "outlook.exe", "onenote.exe", "msaccess.exe"}
-SHELLS = {"powershell.exe", "pwsh.exe", "cmd.exe", "wscript.exe", "cscript.exe",
-          "mshta.exe", "rundll32.exe", "regsvr32.exe", "certutil.exe", "bitsadmin.exe"}
+SHELLS = {
+    "powershell.exe",
+    "pwsh.exe",
+    "cmd.exe",
+    "wscript.exe",
+    "cscript.exe",
+    "mshta.exe",
+    "rundll32.exe",
+    "regsvr32.exe",
+    "certutil.exe",
+    "bitsadmin.exe",
+}
 # Padres legítimos de procesos críticos: cualquier otro es una anomalía fuerte.
-EXPECTED_PARENT = {"lsass.exe": {"wininit.exe"}, "services.exe": {"wininit.exe"},
-                   "winlogon.exe": {"smss.exe"}, "svchost.exe": {"services.exe", "msmpeng.exe"}}
+EXPECTED_PARENT = {
+    "lsass.exe": {"wininit.exe"},
+    "services.exe": {"wininit.exe"},
+    "winlogon.exe": {"smss.exe"},
+    "svchost.exe": {"services.exe", "msmpeng.exe"},
+}
 
 
 def snapshot_processes() -> dict[int, dict]:
@@ -208,7 +281,7 @@ def snapshot_processes() -> dict[int, dict]:
     for p in psutil.process_iter(["pid", "ppid", "name", "exe", "cmdline", "create_time", "username"]):
         info = p.info
         info["cmdline"] = " ".join(info.get("cmdline") or [])
-        procs[info["pid"]] = info            # sin privilegios, exe/cmdline pueden venir vacíos
+        procs[info["pid"]] = info  # sin privilegios, exe/cmdline pueden venir vacíos
     return procs
 
 
@@ -228,8 +301,8 @@ def parent_child_anomalies(procs: dict[int, dict]) -> list[tuple[dict, str, str,
 
 def connections_by_pid() -> dict[int, list]:
     conns: dict[int, list] = {}
-    for c in psutil.net_connections(kind="inet"):   # admin para ver los de todos los usuarios
-        if c.pid and c.raddr:                        # solo conexiones con extremo remoto
+    for c in psutil.net_connections(kind="inet"):  # admin para ver los de todos los usuarios
+        if c.pid and c.raddr:  # solo conexiones con extremo remoto
             conns.setdefault(c.pid, []).append(c)
     return conns
 ```
@@ -238,11 +311,19 @@ def connections_by_pid() -> dict[int, list]:
 
 ```python
 """Señales estáticas baratas sobre un PE. Solo lee el fichero: nunca lo ejecuta."""
+
 import pefile
 
 PACKER_SECTIONS = {"upx0", "upx1", ".aspack", ".adata", ".themida", ".vmp0", ".vmp1", ".enigma1", ".petite"}
-INJECTION_APIS = {"VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread",
-                  "NtCreateThreadEx", "QueueUserAPC", "SetThreadContext", "NtUnmapViewOfSection"}
+INJECTION_APIS = {
+    "VirtualAllocEx",
+    "WriteProcessMemory",
+    "CreateRemoteThread",
+    "NtCreateThreadEx",
+    "QueueUserAPC",
+    "SetThreadContext",
+    "NtUnmapViewOfSection",
+}
 
 
 def pe_signals(path: str, max_bytes: int = 64 * 1024 * 1024) -> list[tuple[str, str, int, str]]:
@@ -259,15 +340,19 @@ def pe_signals(path: str, max_bytes: int = 64 * 1024 * 1024) -> list[tuple[str, 
     high = [s for s in pe.sections if s.get_entropy() > 7.2 and s.SizeOfRawData > 4096]
     if high:
         out.append(("PE_HIGH_ENTROPY", "T1027.002", 20, f"{len(high)} sección(es) con entropía > 7.2"))
-    imports = {imp.name.decode(errors="ignore") for e in getattr(pe, "DIRECTORY_ENTRY_IMPORT", [])
-               for imp in e.imports if imp.name}
+    imports = {
+        imp.name.decode(errors="ignore")
+        for e in getattr(pe, "DIRECTORY_ENTRY_IMPORT", [])
+        for imp in e.imports
+        if imp.name
+    }
     inj = imports & INJECTION_APIS
     if len(inj) >= 3:
         out.append(("PE_INJECTION_IMPORTS", "T1055", 35, ", ".join(sorted(inj))))
     if 0 < len(imports) < 5 and high:
         out.append(("PE_FEW_IMPORTS_PACKED", "T1027.002", 15, f"{len(imports)} imports"))
     ts = pe.FILE_HEADER.TimeDateStamp
-    if ts == 0 or ts > 4102444800:   # 0 o posterior a 2100: timestomping / builder
+    if ts == 0 or ts > 4102444800:  # 0 o posterior a 2100: timestomping / builder
         out.append(("PE_BAD_TIMESTAMP", "T1070.006", 10, str(ts)))
     pe.close()
     return out
@@ -281,8 +366,7 @@ def pe_signals(path: str, max_bytes: int = 64 * 1024 * 1024) -> list[tuple[str, 
 QUERIES = {
     "System": "*[System[(EventID=7045) and TimeCreated[timediff(@SystemTime) <= {ms}]]]",
     "Security": "*[System[(EventID=4698) and TimeCreated[timediff(@SystemTime) <= {ms}]]]",
-    "Microsoft-Windows-Windows Defender/Operational":
-        "*[System[(EventID=1116 or EventID=1117) and TimeCreated[timediff(@SystemTime) <= {ms}]]]",
+    "Microsoft-Windows-Windows Defender/Operational": "*[System[(EventID=1116 or EventID=1117) and TimeCreated[timediff(@SystemTime) <= {ms}]]]",
 }
 # wevtutil qe "<log>" /q:"<query>" /f:xml /c:500 /rd:true
 ```

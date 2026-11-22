@@ -79,3 +79,31 @@ def test_connections_table_dedupes_shared_processes():
     f1 = Finding(**base, connections=[c])
     f2 = Finding(**base, connections=[c], vt={"found": True, "malicious": 1})
     assert connections_table([f1, f2]).row_count == 1
+
+
+def test_html_report_and_json_roundtrip(tmp_path):
+    from win11_triage import report
+
+    cli.main(["--dry-run", "--config-dir", str(tmp_path), "--format", "all", "--no-color"])
+    files = {p.suffix: p for p in (tmp_path / "reportes").iterdir()}
+    assert set(files) == {".md", ".html", ".json"}
+
+    html = files[".html"].read_text(encoding="utf-8")
+    assert html.startswith("<!DOCTYPE html>") and "data:image/png;base64," in html
+    assert "OneSyncHelper" in html and "<script" not in html
+
+    loaded = report.load_json(files[".json"])
+    assert loaded.dry_run and loaded.finished is not None
+    assert {s.value: n for s, n in loaded.counts().items()} == {"DETECTADO": 3, "DESCONOCIDO": 1, "LIMPIO": 2}
+    assert sum(len(f.connections) for f in loaded.findings) == 5
+
+
+def test_html_escapes_untrusted_values():
+    from datetime import datetime
+
+    from win11_triage.report import TriageResult, render_html
+
+    f = Finding("autoruns", "<img src=x onerror=alert(1)>", "C:\\a.exe", "", "", "")
+    r = TriageResult("h", "u", datetime.now(), False, False, {}, sections={"S": [f]})
+    out = render_html(r)
+    assert "<img src=x" not in out and "&lt;img src=x" in out

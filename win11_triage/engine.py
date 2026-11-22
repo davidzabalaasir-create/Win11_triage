@@ -167,6 +167,7 @@ class TriageEngine:
             self._check_cancel()
             res.modules.append("vt")
             self._vt(res)
+        res.finished = datetime.now()
         return res
 
     def _fail(self, res: TriageResult, msg: str) -> None:
