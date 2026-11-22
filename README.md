@@ -3,65 +3,75 @@
 [![CI](https://github.com/davidzabalaasir-create/Win11_triage/actions/workflows/ci.yml/badge.svg)](https://github.com/davidzabalaasir-create/Win11_triage/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Plataforma](https://img.shields.io/badge/plataforma-Windows%2011-0078D6)
+![MITRE ATT&CK](https://img.shields.io/badge/MITRE-ATT%26CK-red)
 [![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-green)](LICENSE)
 
-Herramienta de **triaje defensivo** para Windows 11. Revisa la persistencia del sistema y los ejecutables de las carpetas de usuario con Sysinternals, consulta su reputación en VirusTotal y genera un informe listo para adjuntar a un ticket.
+Herramienta de **triaje defensivo y respuesta a incidentes** para Windows 11. Examina el equipo en vivo:
 
-Se usa de dos formas: con una **interfaz gráfica** o desde la **línea de comandos**.
+- persistencia;
+- procesos y conexiones de red;
+- eventos de Windows;
+- contenido de los ejecutables (análisis PE y YARA);
+- reputación en VirusTotal.
 
-![Interfaz gráfica de win11-triage](docs/gui.png)
+Con todo ello, **puntúa cada elemento de 0 a 100 explicando por qué** y lo relaciona con técnicas de **MITRE ATT&CK**.
 
-## Qué hace
+Se usa con **interfaz gráfica** o desde la **línea de comandos**. Es **solo lectura**: nunca borra, termina procesos ni sube ficheros.
 
-| Módulo | Herramienta | Qué busca |
+![Panel de win11-triage](docs/gui.png)
+
+## Qué analiza
+
+| Módulo | Fuente | Qué busca |
 |---|---|---|
-| `--autoruns` | `autorunsc` | Entradas de arranque (Run, servicios, tareas, drivers…) **no firmadas por Microsoft** o `(Not verified)` |
-| `--scan-user` | `sigcheck` | Ejecutables y DLL **sin firma válida** en `%LOCALAPPDATA%\Temp` y `%APPDATA%` |
-| `--network` | `tcpvcon` | Conexiones activas de los procesos señalados |
-| `--vt` | API v3 de VirusTotal | Reputación de cada SHA-256, con caché, límite de tasa y lista blanca |
+| `--autoruns` | `autorunsc` | Persistencia no firmada por Microsoft **y** abusos de binarios de Microsoft (LOLBins con argumentos peligrosos, WMI, IFEO) |
+| `--scan-user` | `sigcheck` | Ejecutables y DLL sin firma válida en `%LOCALAPPDATA%\Temp` y `%APPDATA%` |
+| `--processes` | `psutil` | Procesos en rutas de usuario, nombres de sistema suplantados, Office lanzando consolas, padres inesperados, binarios borrados |
+| `--events [DÍAS]` | `wevtutil` | Servicios instalados (7045), tareas creadas (4698) y detecciones de Defender (1116/1117) |
+| `--network` | `psutil` (`tcpvcon` de respaldo) | Conexiones externas, correlacionadas **por PID y ruta exacta** |
+| `--static` | `pefile` + YARA | Empaquetadores, entropía alta, imports de inyección, timestamps imposibles y reglas YARA |
+| `--vt` | API v3 de VirusTotal | Reputación de cada SHA-256, con caché y límite de tasa |
 
-Cada elemento recibe un veredicto:
+### Puntuación y veredicto
+
+Cada regla que se dispara aporta una **señal** con su peso, su técnica ATT&CK y la evidencia concreta. Ejemplo: «PowerShell con comando codificado en Base64, +45, T1059.001, `powershell -nop -w hidden -enc SQBF…`». La puntuación es la suma de los pesos, de 0 a 100.
 
 | | Estado | Criterio |
 |---|---|---|
-| 🔴 | **DETECTADO** | Al menos un motor de VirusTotal lo marca como malicioso |
-| 🟡 | **DESCONOCIDO** | Sin firma o no verificado, y sin veredicto limpio en VT |
-| 🟢 | **LIMPIO** | 0 detecciones en VT, o firma válida de un tercero si no se consultó VT |
+| 🔴 | **DETECTADO** | VirusTotal ≥ 1 motor **o** puntuación ≥ 70 |
+| 🟡 | **SOSPECHOSO / SIN FIRMA** | Puntuación 30–69, o sin firma válida |
+| 🟢 | **LIMPIO** | Puntuación < 30 y firma válida o VirusTotal limpio |
+
+Una sola señal débil (sin firma, carpeta de usuario) nunca basta para el rojo. Una firma válida resta puntos, salvo que el binario firmado se esté usando de forma maliciosa (por ejemplo, `mshta.exe` lanzando una URL desde la clave Run).
 
 > [!IMPORTANT]
-> Es una herramienta de **triaje**, no un antivirus. Un 🟡 no significa malware y un 🟢 no garantiza que no lo sea: úsala para priorizar qué revisar.
+> Es una herramienta de **triaje**, no un antivirus. Sirve para **priorizar** qué revisar primero.
 
 ## Instalación
 
 ### Opción A: ejecutable (sin Python)
 
-Descarga `win11-triage-gui.exe` (interfaz) o `win11-triage.exe` (consola) desde [Releases](https://github.com/davidzabalaasir-create/Win11_triage/releases) o desde los artefactos de la última ejecución de [CI](https://github.com/davidzabalaasir-create/Win11_triage/actions). El `.env`, `whitelist.json`, la caché y los informes se guardan junto al `.exe`.
-
-Solo necesitas además las herramientas de Sysinternals:
-
-```powershell
-winget install --id Microsoft.Sysinternals.Autoruns -e
-winget install --id Microsoft.Sysinternals.Sigcheck -e
-winget install --id Microsoft.Sysinternals.TCPView -e
-```
+Descarga `win11-triage-gui.exe` (interfaz) o `win11-triage.exe` (consola) desde [Releases](https://github.com/davidzabalaasir-create/Win11_triage/releases) o desde los artefactos de la última ejecución de [CI](https://github.com/davidzabalaasir-create/Win11_triage/actions). La configuración y los informes se guardan junto al `.exe`.
 
 ### Opción B: desde el código
-
-Requisitos: Windows 10/11, Python 3.10+ y las herramientas de Sysinternals.
 
 ```powershell
 git clone https://github.com/davidzabalaasir-create/Win11_triage.git
 cd Win11_triage
-python -m pip install .
-
-winget install --id Microsoft.Sysinternals.Autoruns -e
-winget install --id Microsoft.Sysinternals.Sigcheck -e
-winget install --id Microsoft.Sysinternals.TCPView -e
-
-copy .env.example .env   # y pega tu VT_API_KEY
+python -m pip install ".[yara]"     # sin YARA: python -m pip install .
 ```
 
-La herramienta busca los `.exe` en `SYSINTERNALS_DIR` (si lo defines en `.env`), en el `PATH` y en la carpeta de WinGet (`%LOCALAPPDATA%\Microsoft\WinGet`). Si falta alguno, muestra cómo instalarlo.
+### Herramientas de Sysinternals (en ambos casos)
+
+```powershell
+winget install --id Microsoft.Sysinternals.Autoruns -e
+winget install --id Microsoft.Sysinternals.Sigcheck -e
+winget install --id Microsoft.Sysinternals.TCPView -e   # opcional: respaldo de --network
+```
+
+### Clave de VirusTotal (opcional)
+
+Desde la interfaz, en **«Clave de VirusTotal…»**. A mano: `copy .env.example .env` y escribe `VT_API_KEY=tu_clave`. El `.env` está en `.gitignore`: la clave nunca se sube a GitHub.
 
 ## Interfaz gráfica
 
@@ -69,126 +79,124 @@ La herramienta busca los `.exe` en `SYSINTERNALS_DIR` (si lo defines en `.env`),
 win11-triage-gui          # o: win11-triage --gui · o doble clic en win11-triage-gui.pyw
 ```
 
-- **Panel izquierdo**:
-  - módulos a ejecutar y modo demostración;
-  - límite de consultas a VirusTotal y formato del informe;
-  - estado de las herramientas de Sysinternals, con el comando `winget` para instalar las que falten.
-- **Tarjetas de resumen**: detectados, desconocidos, limpios y en lista blanca.
-- **Tabla de hallazgos**: filtros por estado, búsqueda y orden al pulsar cada columna. Doble clic abre el informe de VirusTotal.
-- **Panel de detalle** del elemento seleccionado, con acciones:
-  - abrir en VirusTotal;
-  - copiar el SHA-256;
-  - mostrarlo en el Explorador;
-  - **ignorar su ruta o su hash** (se añade a `whitelist.json`).
-- **Pestañas Conexiones y Registro**: conexiones activas de los procesos señalados y log de la ejecución.
-- **Botones extra**: «Clave de VirusTotal…» guarda la API key en `.env` sin mostrarla y «Reiniciar como administrador» la reabre elevada.
+![Hallazgos con el porqué de cada uno](docs/gui_hallazgos.png)
 
-El análisis corre en segundo plano: la ventana no se bloquea y se puede **cancelar** en cualquier momento, también durante la espera entre consultas a VirusTotal.
+- **Panel**:
+  - distribución de veredictos y puntuación máxima;
+  - elementos sospechosos por origen;
+  - técnicas ATT&CK observadas;
+  - **«Prioriza esto primero»** (doble clic para saltar al elemento).
+- **Hallazgos**:
+  - filtros, búsqueda (por nombre, ruta, hash o técnica, como `T1059.001`) y orden por columnas;
+  - interruptor **«Solo nuevos»**;
+  - panel **«Por qué»** con cada señal, su peso, su técnica y la evidencia;
+  - acciones: VirusTotal, ATT&CK, copiar hash, ruta o línea de comandos, Explorador e ignorar ruta o hash (también con clic derecho).
+- **Conexiones**: conexiones externas de los procesos señalados. Permite buscar la IP en VirusTotal o copiarla.
+- **Historial**: análisis anteriores. Puedes recargar cualquiera y la tarjeta **«Nuevos»** marca lo que ha aparecido desde el análisis anterior.
+- **Exportar**: CSV de la vista actual (se abre en Excel), HTML, Markdown o JSON.
+- **Perfiles**: **Rápido** o **Completo**. La interfaz recuerda tus preferencias.
+- **Atajos**: `Ctrl+R` analizar · `Esc` cancelar · `Ctrl+F` buscar · `Ctrl+E` exportar CSV · `Ctrl+O` abrir informe · `Ctrl+1…5` pestañas · `F5` volver a comprobar las herramientas.
+
+El análisis corre en segundo plano y se puede **cancelar** en cualquier momento.
 
 ## Línea de comandos
 
 ![Demo de la CLI](docs/demo.svg)
 
-Abre la consola **como administrador** (sin elevación, autoruns no ve todas las ubicaciones):
-
 ```powershell
-win11-triage                    # solo comprueba el entorno
-win11-triage --all              # todos los módulos
-win11-triage --autoruns --vt    # persistencia + VirusTotal
-win11-triage --all --format both --vt-limit 20
-win11-triage --dry-run          # demostración con datos de ejemplo (sin red ni herramientas)
+win11-triage                          # solo comprueba el entorno
+win11-triage --all                    # todos los módulos
+win11-triage --autoruns --processes --network   # triaje rápido sin red externa
+win11-triage --events 30              # servicios, tareas y Defender de los últimos 30 días
+win11-triage --all --format all --vt-limit 20
+win11-triage --dry-run                # demostración con datos de ejemplo
 ```
-
-Sin instalar el paquete: `python win11-triage.py --all`.
 
 | Opción | Descripción |
 |---|---|
-| `--all` | Activa `--autoruns --scan-user --network --vt` |
-| `--vt-limit N` | Máximo de consultas **nuevas** a VT (las de caché no cuentan) |
-| `--format md\|json\|both` | Formato del informe (por defecto `md`) |
-| `--output-dir DIR` | Carpeta de informes (por defecto `<config-dir>/reportes`) |
-| `--config-dir DIR` | Dónde están `.env`, `whitelist.json` y `vt_cache.json` (por defecto `WIN11_TRIAGE_HOME` o la carpeta actual) |
-| `--no-report` · `--no-color` · `-v` | Sin informe · sin colores · modo detallado |
+| `--all` | Activa todos los módulos |
+| `--vt-limit N` | Máximo de consultas **nuevas** a VirusTotal (las de caché no cuentan) |
+| `--format md\|html\|json\|both\|all` | Formato del informe (`both` = md + json, `all` = los tres) |
+| `--output-dir DIR` / `--config-dir DIR` | Carpeta de informes / de `.env`, `whitelist.json`, `vt_cache.json` y `yara/` |
+| `--no-report` · `--no-color` · `-v` · `--gui` | Sin informe · sin colores · detallado · abrir la interfaz |
 
-### Códigos de salida
+**Códigos de salida:**
+- `0`: nada detectado.
+- `1`: entorno incompleto.
+- `2`: hay elementos detectados.
+- `130`: interrumpido.
 
-| Código | Significado |
-|---|---|
-| `0` | Sin detecciones (o `--dry-run`) |
-| `1` | Entorno incompleto o configuración inválida |
-| `2` | Al menos un elemento detectado por VirusTotal |
-| `130` | Interrumpido con Ctrl+C |
-
-Así se puede usar en tareas programadas o scripts: `win11-triage --all || echo "Revisar informe"`.
-
-## VirusTotal
-
-- Solo se envía el **hash SHA-256**, nunca el archivo.
-- **Caché** en `vt_cache.json`: un hash no se consulta dos veces. Los "no encontrado" se vuelven a consultar a los 7 días y los errores no se guardan.
-- **15 s entre peticiones nuevas** para respetar el plan gratuito (4/min). Si VT responde 429, espera 60 s y reintenta una vez.
-- Si la clave es inválida (401/403), se detiene y conserva lo ya consultado.
-
-## Lista blanca
-
-`whitelist.json` (se crea vacío la primera vez):
-
-```json
-{
-  "paths": ["C:\\Program Files\\MiApp\\*", "%APPDATA%\\Zoom\\bin\\Zoom.exe", "D:\\Herramientas\\"],
-  "hashes": ["e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"]
-}
-```
-
-- No distingue mayúsculas.
-- Admite `*`, variables `%VAR%` y prefijos de carpeta terminados en `\`.
+Sirven para tareas programadas o pipelines.
 
 ## Informes
 
-Se guardan en `reportes/triage_<equipo>_<fecha>.md` (y `.json` con `--format both`). Incluyen:
+En `reportes/triage_<equipo>_<fecha>.{html,md,json}`. Incluyen:
 
 - resumen;
-- entorno y errores de la ejecución;
-- una tabla por módulo;
-- detalle plegable de cada elemento: ruta, ubicación de persistencia, firma, SHA-256, enlace a VT y conexiones.
+- **«Prioriza esto primero»** (los 5 elementos de mayor puntuación);
+- tabla de **técnicas ATT&CK** con enlaces a attack.mitre.org;
+- una tabla por módulo con su puntuación y el «por qué»;
+- detalle de cada elemento con sus señales (peso, técnica y evidencia), sus conexiones y VirusTotal.
 
-El JSON contiene los mismos datos y está pensado para integrarse con un SIEM o con otros scripts.
+El **HTML** es un único archivo que se puede imprimir a PDF. El **JSON** (`schema_version: 2`) está pensado para SIEM y automatización:
 
-## Cómo funciona
-
+```json
+{ "schema_version": 2, "max_score": 100,
+  "attack": [{"id": "T1059.001", "name": "PowerShell", "count": 3}],
+  "findings": [{ "source": "autoruns", "name": "UpdChk", "status": "DETECTADO", "score": 100,
+                 "signals": [{"id": "CMD_PS_ENCODED", "weight": 45, "attack": "T1059.001", "evidence": "powershell … -enc …"}],
+                 "attack": ["T1059.001", "T1071", "T1218", "T1546.003", "T1564.003"] }] }
 ```
-autorunsc -accepteula -nobanner -a * -c -h -s      → CSV (UTF-16) → filtro no-Microsoft
-sigcheck  -accepteula -nobanner -u -e -c -h -s DIR → CSV           → filtro sin firma
-tcpvcon   -accepteula -nobanner -c -n              → CSV           → correlación por nombre de imagen
-                                     ↓
-                     lista blanca → VirusTotal → Rich + Markdown/JSON
-```
 
-> [!NOTE]
-> La correlación de `--network` se hace por **nombre de ejecutable**, porque tcpvcon no da la ruta completa. Dos binarios con el mismo nombre en rutas distintas se asociarán entre sí.
+## Configuración
+
+| Archivo | Para qué |
+|---|---|
+| `.env` | `VT_API_KEY` y, opcionalmente, `SYSINTERNALS_DIR` |
+| `whitelist.json` | `paths` (admite `*`, `%VAR%` y carpetas terminadas en `\`), `hashes` y `publishers` (solo se aplica a elementos con firma válida) |
+| `yara/*.yar` | Tus reglas YARA. Se suman a las incluidas; usa `meta: description`, `mitre` y `weight` |
+| `vt_cache.json` | Caché de VirusTotal. Los «no encontrado» caducan a los 7 días |
+
+## Falsos positivos conocidos
+
+| Señal | Puede saltar con | Qué hacer |
+|---|---|---|
+| Carpeta de usuario | Teams, Zoom, Discord, Spotify (viven en AppData) | Si están firmados quedan en 🟢. Si no, `publishers` o `paths` en la lista blanca |
+| Sin firma | Scripts internos, herramientas portables | Por sí sola solo da 🟡 |
+| Empaquetador / entropía | Instaladores (NSIS, Inno), protectores anti-trampas | Peso bajo: necesita otras señales para llegar al rojo |
+| Imports de inyección | Depuradores, antivirus, overlays (Discord, NVIDIA) | Lista blanca por editor firmado |
+| PowerShell oculto | Intune/SCCM, scripts de inicio corporativos | Lista blanca por hash o ruta |
+| Evento 4698 | Requiere la auditoría «Otros eventos de objetos» | Se informa como «no disponible», nunca como «sin tareas» |
+
+**Limitaciones:**
+- Sin acceso a kernel ni a memoria, un rootkit puede esconderse.
+- Sin privilegios de administrador se ve menos.
+- La herramienta no ejecuta muestras.
 
 ## Desarrollo
 
 ```bash
-pip install -e ".[dev]"
-pytest                    # tests (no necesitan Windows ni red)
+pip install -e ".[dev,yara]"
+pytest                          # 100+ tests; no necesitan Windows ni red
 ruff check . && ruff format --check .
-python scripts/make_demo.py   # regenera docs/demo.svg
+python scripts/make_demo.py     # regenera docs/demo.svg
+python scripts/make_icon.py     # regenera el logo
 ```
 
 Ejecutables (en Windows): `powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1`. La CI los compila en cada cambio y los adjunta a la release al publicar un tag `v*`.
 
 ```
 win11_triage/
-├── engine.py       # motor de triaje compartido por CLI y GUI
-├── gui.py          # interfaz gráfica (CustomTkinter)
-├── cli.py          # línea de comandos (Rich)
-├── env_check.py    # localización de Sysinternals y privilegios
-├── collectors.py   # ejecución y parseo de autorunsc / sigcheck / tcpvcon
-├── virustotal.py   # cliente VT v3 con caché y límite de tasa
-├── whitelist.py    # lista blanca
-├── report.py       # tablas Rich, Markdown y JSON
-├── models.py       # Finding, Connection, Status
-└── samples/        # datos de ejemplo para --dry-run y tests
+├── engine.py              # orquesta: colectores → reglas → red → contenido → VT → veredicto
+├── collectors.py          # autorunsc / sigcheck / tcpvcon
+├── collectors_live.py     # procesos y conexiones (psutil)
+├── collectors_events.py   # eventos 7045 / 4698 / Defender (wevtutil)
+├── enrich/                # análisis PE (pefile) y YARA
+├── rules/                 # heurísticas, ATT&CK y reglas YARA incluidas
+├── virustotal.py          # cliente VT v3 con caché y límite de tasa
+├── report.py              # Rich, Markdown, HTML y JSON v2
+├── gui/                   # interfaz (CustomTkinter): app, gráficos, historial
+└── samples/               # datos de ejemplo para --dry-run y tests
 ```
 
 ## Licencia

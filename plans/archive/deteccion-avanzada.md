@@ -1,6 +1,6 @@
 # Plan: detección avanzada para win11-triage (v2.0)
 
-Estado: **PROPUESTA, pendiente de aprobación**. No se implementa nada hasta que se aprueben las decisiones de la sección «Preguntas».
+Estado: **COMPLETADO (v2.0.0)**. Las 7 decisiones (D1–D7) se aprobaron tal como estaban recomendadas.
 
 ## 0. Contexto (rellenado a partir del código actual, v1.2.0)
 
@@ -656,11 +656,30 @@ Frontera paralelizable tras la Fase 1: **2, 3, 4, 5 y 6** son independientes ent
 ## Progreso
 | Fase | Estado |
 |---|---|
-| 0. Cerrar trabajo GUI en curso | pendiente |
-| 1. Motor de señales y score | pendiente |
-| 2. Heurísticas + ATT&CK | pendiente |
-| 3. Procesos y red (psutil) | pendiente |
-| 4. Estático PE | pendiente |
-| 5. YARA | pendiente |
-| 6. Eventos y Defender | pendiente |
-| 7. Informes y GUI | pendiente |
+| 0. Cerrar trabajo GUI en curso | hecho |
+| 1. Motor de señales y score | hecho |
+| 2. Heurísticas + ATT&CK | hecho |
+| 3. Procesos y red (psutil) | hecho |
+| 4. Estático PE | hecho |
+| 5. YARA | hecho |
+| 6. Eventos y Defender | hecho |
+| 7. Informes y GUI | hecho |
+
+## Registro de ejecución
+
+- **Entregado**: todas las fases en la v2.0.0.
+- **Desviaciones respecto al plan**:
+  - El análisis PE y YARA se exponen juntos como un único módulo, `--static`, para simplificar la interfaz.
+  - Se añadieron reglas no previstas al detectar falsos negativos en las pruebas:
+    - `PERSIST_LOLBIN`: una persistencia que lanza un LOLBin;
+    - `PERSIST_ACCESSIBILITY_BACKDOOR`: secuestro de las herramientas de accesibilidad vía IFEO;
+    - la firma de Microsoft no exculpa en las categorías WMI e IFEO.
+  - La señal «fichero reciente» se limita a ficheros: en procesos y eventos se cumplía siempre.
+  - El hash se propaga entre hallazgos que apuntan al mismo fichero, para que VirusTotal también cubra procesos y eventos.
+  - Lista blanca por editor firmado (`publishers`).
+- **Verificación**:
+  - `pytest`: 113 tests pasan con Python 3.12, yara-python y Xvfb; 107 con Python 3.13 sin tkinter ni YARA (los de GUI y YARA se omiten);
+  - las reglas YARA compilan y detectan sus casos sin falsos positivos con un script benigno;
+  - la GUI se revisó con capturas en modo demostración;
+  - la CI de Windows compila los `.exe`.
+- **Pendiente fuera de alcance**: probar con Sysinternals reales en un Windows físico, y la carga de DLL laterales (DLL sideloading), que quedó como niebla.

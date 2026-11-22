@@ -2,6 +2,38 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y [SemVer](https://semver.org/lang/es/).
 
+## [2.0.0] — 2026-11-22
+
+### Añadido
+- **Puntuación 0–100 explicable**: cada regla aporta una señal con peso, técnica MITRE ATT&CK y evidencia. Veredicto: 🔴 VT ≥ 1 o score ≥ 70 · 🟡 30–69 o sin firma · 🟢 resto.
+- **Heurísticas**:
+  - LOLBins: PowerShell codificado, oculto o descargando; mshta, regsvr32, rundll32, certutil, bitsadmin y WSH;
+  - rutas escribibles por el usuario;
+  - suplantación de binarios de sistema, typosquatting y dobles extensiones;
+  - categorías de persistencia con peso ATT&CK;
+  - puerta trasera de accesibilidad vía IFEO;
+  - LOLBins firmados en autoarranque.
+- `--processes`: procesos sospechosos con psutil (Office → consola, padres inesperados, binarios borrados).
+- `--network` correlaciona por **PID y ruta exacta** (tcpvcon queda como respaldo).
+- `--static`: análisis PE con pefile y **YARA** opcional (7 reglas incluidas y reglas propias en `<config-dir>/yara/`).
+- `--events [DÍAS]`: servicios 7045, tareas 4698 y detecciones de Defender 1116/1117.
+- **Informes**:
+  - «Prioriza esto primero» y resumen de técnicas ATT&CK;
+  - tabla de señales por elemento;
+  - nuevo formato **HTML** (`--format html|all`);
+  - JSON `schema_version: 2`.
+- **GUI renovada**:
+  - logo nuevo;
+  - panel con gráficos (distribución, puntuación, origen, ATT&CK) y prioridades;
+  - historial con recarga y marca de **novedades**;
+  - exportación CSV, HTML, MD y JSON;
+  - menús contextuales, perfiles Rápido y Completo, atajos de teclado y preferencias persistentes.
+- Lista blanca por **editor firmado** (`publishers`).
+
+### Cambiado
+- Las entradas firmadas por Microsoft ya no se descartan si se usan de forma sospechosa (LOLBin, WMI, IFEO).
+- Dependencias nuevas: `psutil`, `pefile`, `pillow`. Extra opcional `[yara]`.
+
 ## [1.2.0] — 2026-11-22
 
 ### Añadido
