@@ -201,7 +201,20 @@ win11_triage/
 
 ## Firma de código
 
-Los binarios de Windows se firmarán mediante [SignPath.io](https://about.signpath.io/) con un certificado de [SignPath Foundation](https://signpath.org/). Ver la [política de firma](CODE_SIGNING_POLICY.md).
+El **Control de aplicaciones inteligente** de Windows 11 bloquea los ejecutables sin firma. Hay dos vías:
+
+- **SignPath Foundation** (solicitada): los binarios se firmarán mediante [SignPath.io](https://about.signpath.io/) con un certificado de [SignPath Foundation](https://signpath.org/). Ver la [política de firma](CODE_SIGNING_POLICY.md).
+- **Certum Open Source Code Signing** (firma manual con tu certificado): con SimplySign Desktop conectado e [Inno Setup](https://jrsoftware.org/isinfo.php) instalado, descarga `win11-triage-portable-<versión>.zip` de la release y ejecuta:
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts\sign_release.ps1 -Portable "$HOME\Downloads\win11-triage-portable-2.0.0.zip"
+  ```
+
+  Firma todos los binarios sin firma con sello de tiempo, reconstruye y firma el instalador, y deja en `dist-signed\` los archivos firmados y sus SHA-256 para subirlos a la release.
+
+### Publicar una versión
+
+Con un tag `v*`, o desde **Actions → CI → Run workflow** indicando `release_tag` (p. ej. `v2.0.0`): la CI compila, prueba el instalador y publica la release con el instalador y la versión portable.
 
 ## Licencia
 

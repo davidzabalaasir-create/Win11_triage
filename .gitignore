@@ -15,3 +15,4 @@ gui_settings.json
 yara/
 packaging/version_info.txt
 !packaging/win11-triage.spec
+dist-signed/
