@@ -199,6 +199,10 @@ win11_triage/
 └── samples/               # datos de ejemplo para --dry-run y tests
 ```
 
+## Firma de código
+
+Los binarios de Windows se firmarán mediante [SignPath.io](https://about.signpath.io/) con un certificado de [SignPath Foundation](https://signpath.org/). Ver la [política de firma](CODE_SIGNING_POLICY.md).
+
 ## Licencia
 
 [MIT](LICENSE)
