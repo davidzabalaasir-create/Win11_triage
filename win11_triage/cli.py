@@ -178,6 +178,12 @@ def show_env(tools: dict[str, env_check.ToolStatus], needed: set[str], hints: bo
 
 def print_results(res: TriageResult) -> None:
     console.print()
+    if report.top_findings(res.findings):
+        console.print(report.priority_table(res.findings))
+        console.print()
+    if report.attack_summary(res.findings):
+        console.print(report.attack_table(res.findings))
+        console.print()
     for title, fs in res.sections.items():
         console.print(report.findings_table(f"{title} ({len(fs)})", fs))
         console.print()

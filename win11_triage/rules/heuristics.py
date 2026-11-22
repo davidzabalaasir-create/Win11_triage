@@ -181,7 +181,7 @@ def signature(f: Finding) -> Iterable[Signal]:
 def user_writable_path(f: Finding) -> Iterable[Signal]:
     path = _clean_path(f)
     if USER_WRITABLE.search(path):
-        return [Signal("PATH_USER_WRITABLE", "Ejecutable en carpeta escribible por el usuario", 20, "T1036", path)]
+        return [Signal("PATH_USER_WRITABLE", "Ejecutable en carpeta escribible por el usuario", 20, "", path)]
     return []
 
 

@@ -9,7 +9,7 @@ description = "Triaje defensivo de Windows 11: persistencia, binarios sin firma 
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
-dependencies = ["rich>=13.7", "requests>=2.31", "python-dotenv>=1.0", "customtkinter>=5.2"]
+dependencies = ["rich>=13.7", "requests>=2.31", "python-dotenv>=1.0", "customtkinter>=5.2", "pillow>=10", "psutil>=5.9", "pefile>=2023.2.7"]
 keywords = ["dfir", "blue-team", "windows", "sysinternals", "virustotal", "incident-response"]
 classifiers = [
     "Environment :: Console",
@@ -22,6 +22,7 @@ classifiers = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
 build = ["pyinstaller>=6.6"]
+yara = ["yara-python>=4.3"]
 
 [project.scripts]
 win11-triage = "win11_triage.cli:main"
@@ -39,7 +40,7 @@ version = { attr = "win11_triage.__version__" }
 include = ["win11_triage*"]
 
 [tool.setuptools.package-data]
-win11_triage = ["samples/*", "assets/*"]
+win11_triage = ["samples/*", "assets/*", "rules/yara/*.yar"]
 
 [tool.ruff]
 line-length = 120

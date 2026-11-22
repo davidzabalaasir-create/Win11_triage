@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,yara]"
       - name: Tests (Windows)
         if: runner.os == 'Windows'
         run: pytest -q

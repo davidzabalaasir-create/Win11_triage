@@ -117,3 +117,20 @@ def test_events_flag_days(tmp_path):
     assert a.options.events and a.options.event_days == 30 and not a.options.autoruns
     b = cli.parse_args(["--events", "--config-dir", str(tmp_path)])
     assert b.options.event_days == 7
+
+
+def test_reports_include_priority_attack_and_signals(tmp_path):
+    cli.main(["--dry-run", "--config-dir", str(tmp_path), "--format", "all", "--no-color"])
+    files = {p.suffix: p for p in (tmp_path / "reportes").iterdir()}
+    md = files[".md"].read_text(encoding="utf-8")
+    assert "## Prioriza esto primero" in md and "## Técnicas MITRE ATT&CK observadas" in md
+    assert "https://attack.mitre.org/techniques/T1059/001/" in md
+    assert "| Señal | Peso | ATT&CK | Evidencia |" in md
+    data = json.loads(files[".json"].read_text(encoding="utf-8"))
+    assert data["schema_version"] == 2 and data["max_score"] == 100
+    assert {"id", "name", "count"} <= set(data["attack"][0])
+    first = data["findings"][0]
+    assert first["score"] >= 70 and first["signals"] and "attack" in first
+    assert len(data["priority"]) == 5 and data["priority"][0] == "autoruns:OneSyncHelper"
+    html = files[".html"].read_text(encoding="utf-8")
+    assert "Prioriza esto primero" in html and "ATT&amp;CK" in html

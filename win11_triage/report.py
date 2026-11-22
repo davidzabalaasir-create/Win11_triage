@@ -15,6 +15,7 @@ from rich.table import Table
 from . import __version__
 from .env_check import ToolStatus
 from .models import Connection, Finding, Signal, Status
+from .rules.attack import attack_url, technique_name
 
 
 @dataclass
@@ -54,7 +55,35 @@ class TriageResult:
 
 
 def sort_findings(findings: list[Finding]) -> list[Finding]:
-    return sorted(findings, key=lambda f: (f.status.rank, f.source, f.name.lower()))
+    return sorted(findings, key=lambda f: (f.status.rank, -f.score, -f.raw_score, f.source, f.name.lower()))
+
+
+def top_findings(findings: list[Finding], n: int = 5) -> list[Finding]:
+    """Lo primero que debería mirar un analista: lo rojo/amarillo con más puntuación."""
+    ranked = sorted(
+        (f for f in findings if f.status is not Status.CLEAN),
+        key=lambda f: (f.status.rank, -f.score, -f.raw_score, f.name.lower()),
+    )
+    return ranked[:n]
+
+
+def attack_summary(findings: list[Finding]) -> list[tuple[str, str, int]]:
+    """(técnica, nombre, nº de elementos no limpios) ordenado por frecuencia."""
+    counts: dict[str, int] = {}
+    for f in findings:
+        if f.status is Status.CLEAN:
+            continue
+        for t in f.attack:
+            counts[t] = counts.get(t, 0) + 1
+    return sorted(((t, technique_name(t), n) for t, n in counts.items()), key=lambda x: (-x[2], x[0]))
+
+
+def why(f: Finding, n: int = 2) -> str:
+    """Resumen corto de las señales positivas de mayor peso."""
+    return " · ".join([s.title for s in f.unique_signals if s.weight > 0][:n])
+
+
+SOURCE_LABEL = {"autoruns": "Persistencia", "sigcheck": "Carpeta usuario", "process": "Proceso", "event": "Evento"}
 
 
 # ------------------------------------------------------------------ Rich
@@ -74,23 +103,57 @@ def env_table(tools: dict[str, ToolStatus]) -> Table:
 def findings_table(title: str, findings: list[Finding]) -> Table:
     t = Table(title=title, title_style="bold", title_justify="left", expand=True)
     t.add_column("Estado", no_wrap=True)
-    t.add_column("Nombre", overflow="fold", max_width=28)
+    t.add_column("Score", no_wrap=True, justify="right")
+    t.add_column("Nombre", overflow="fold", max_width=30)
     t.add_column("Ruta", overflow="fold", ratio=3)
-    t.add_column("Editor / Firma", overflow="fold", ratio=2)
-    t.add_column("SHA-256", no_wrap=True)
+    t.add_column("Por qué", overflow="fold", ratio=4)
     t.add_column("VT", no_wrap=True, justify="right")
     t.add_column("Red", no_wrap=True, justify="right")
     for f in sort_findings(findings):
         st = f.status
         t.add_row(
             f"[{st.style}]{st.value}[/]",
+            f"[{st.style}]{f.score}[/]",
             f.name,
             f.path or "—",
-            f"{f.publisher}\n[dim]{f.signature}[/]",
-            f"{f.sha256[:16]}…" if f.sha256 else "[dim]n/d[/]",
+            why(f) or f"[dim]{f.signature}[/]",
             f"[{st.style}]{f.vt_summary}[/]",
             f"[magenta]{len(f.connections)}[/]" if f.connections else "[dim]—[/]",
         )
+    return t
+
+
+def priority_table(findings: list[Finding]) -> Table:
+    t = Table(title="Prioriza esto primero", title_style="bold", title_justify="left", expand=True)
+    for col, kw in (
+        ("#", {"justify": "right"}),
+        ("Score", {"justify": "right"}),
+        ("Origen", {}),
+        ("Nombre", {"overflow": "fold"}),
+        ("Por qué", {"overflow": "fold", "ratio": 3}),
+        ("ATT&CK", {"overflow": "fold"}),
+    ):
+        t.add_column(col, **kw)
+    for i, f in enumerate(top_findings(findings), 1):
+        st = f.status
+        t.add_row(
+            str(i),
+            f"[{st.style}]{f.score}[/]",
+            SOURCE_LABEL.get(f.source, f.source),
+            f.name,
+            why(f, 3),
+            ", ".join(f.attack[:4]),
+        )
+    return t
+
+
+def attack_table(findings: list[Finding]) -> Table:
+    t = Table(title="Técnicas MITRE ATT&CK observadas", title_style="bold", title_justify="left")
+    t.add_column("Técnica")
+    t.add_column("Nombre")
+    t.add_column("Elementos", justify="right")
+    for tid, name, n in attack_summary(findings):
+        t.add_row(tid, name, str(n))
     return t
 
 
@@ -154,6 +217,20 @@ def render_markdown(r: TriageResult) -> str:
     L += [f"| {st.icon} {st.value} | {counts[st]} |" for st in Status]
     L.append("")
 
+    top = top_findings(r.findings)
+    if top:
+        L += ["## Prioriza esto primero", "", "| # | Score | Origen | Nombre | Por qué |", "|---|---|---|---|---|"]
+        L += [
+            f"| {i} | {f.status.icon} {f.score} | {SOURCE_LABEL.get(f.source, f.source)} | {_md(f.name)} | {_md(why(f, 3))} |"
+            for i, f in enumerate(top, 1)
+        ]
+        L.append("")
+    techniques = attack_summary(r.findings)
+    if techniques:
+        L += ["## Técnicas MITRE ATT&CK observadas", "", "| Técnica | Nombre | Elementos |", "|---|---|---|"]
+        L += [f"| [{t}]({attack_url(t)}) | {_md(name)} | {n} |" for t, name, n in techniques]
+        L.append("")
+
     if r.errors:
         L += ["## Errores durante la ejecución", ""] + [f"- {_md(e)}" for e in r.errors] + [""]
 
@@ -166,15 +243,17 @@ def render_markdown(r: TriageResult) -> str:
         if not findings:
             L += ["_Sin hallazgos._", ""]
             continue
-        L += ["| Estado | Nombre | Ruta | Editor | Firma | VT | Red |", "|---|---|---|---|---|---|---|"]
+        L += ["| Estado | Score | Nombre | Ruta | Por qué | VT | Red |", "|---|---|---|---|---|---|---|"]
         for f in sort_findings(findings):
             L.append(
-                f"| {f.status.icon} {f.status.value} | {_md(f.name)} | {_code(f.path)} | {_md(f.publisher)} "
-                f"| {_md(f.signature)} | {_md(f.vt_summary)} | {len(f.connections) or '—'} |"
+                f"| {f.status.icon} {f.status.value} | {f.score} | {_md(f.name)} | {_code(f.path)} "
+                f"| {_md(why(f)) or '—'} | {_md(f.vt_summary)} | {len(f.connections) or '—'} |"
             )
         L += ["", "<details><summary>Detalle de cada elemento</summary>", ""]
         for f in sort_findings(findings):
-            L += [f"### {f.status.icon} {_md(f.name)}", "", f"- **Ruta:** {_code(f.path)}"]
+            L += [f"### {f.status.icon} {_md(f.name)} — score {f.score}", "", f"- **Ruta:** {_code(f.path)}"]
+            if f.cmdline:
+                L.append(f"- **Línea de comandos:** {_code(f.cmdline[:400])}")
             if f.location:
                 L.append(f"- **Ubicación:** {_code(f.location)}")
             if f.category:
@@ -197,21 +276,32 @@ def render_markdown(r: TriageResult) -> str:
                 L.append(f"- **VirusTotal:** {_md(f.vt_summary)}")
             for c in f.connections:
                 L.append(f"- **Conexión:** {c.protocol} {_code(c.local)} → {_code(c.remote)} ({c.state}, PID {c.pid})")
+            if f.unique_signals:
+                L += ["", "| Señal | Peso | ATT&CK | Evidencia |", "|---|---|---|---|"]
+                L += [
+                    f"| {_md(x.title)} | {x.weight:+d} | {_md(x.attack) or '—'} | {_code(x.evidence[:160]) if x.evidence else '—'} |"
+                    for x in f.unique_signals
+                ]
             L.append("")
         L += ["</details>", ""]
 
     L += [
         "---",
         "",
-        "_Leyenda: 🔴 detectado por VirusTotal · 🟡 sin firma / desconocido · 🟢 limpio o firma válida de terceros._",
+        "_Leyenda: 🔴 VirusTotal ≥ 1 motor o score ≥ 70 · 🟡 score 30–69 o sin firma · "
+        "🟢 score < 30 con firma válida o VirusTotal limpio. Herramienta de triaje: no sustituye a un antivirus._",
         "",
     ]
     return "\n".join(L)
 
 
 # ------------------------------------------------------------------ JSON
+SCHEMA_VERSION = 2
+
+
 def to_json(r: TriageResult) -> dict[str, Any]:
     return {
+        "schema_version": SCHEMA_VERSION,
         "tool": "win11-triage",
         "version": __version__,
         "host": r.host,
@@ -223,6 +313,9 @@ def to_json(r: TriageResult) -> dict[str, Any]:
         "modules": r.modules,
         "tools": {n: (str(t.path) if t.path else None) for n, t in r.tools.items()},
         "summary": {st.value: n for st, n in r.counts().items()},
+        "max_score": max((f.score for f in r.findings), default=0),
+        "attack": [{"id": t, "name": name, "count": n} for t, name, n in attack_summary(r.findings)],
+        "priority": [f"{f.source}:{f.name}" for f in top_findings(r.findings)],
         "whitelisted": r.whitelisted,
         "vt_stats": r.vt_stats,
         "errors": r.errors,
@@ -339,7 +432,29 @@ def render_html(r: TriageResult) -> str:
     parts.append(f"<div class='cards'>{cards}</div>")
     parts.append("<table>" + "".join(f"<tr><th>{_e(k)}</th><td>{_e(v)}</td></tr>" for k, v in meta) + "</table>")
     if r.errors:
-        parts.append("<h2>Errores</h2><ul>" + "".join(f"<li>{_e(e)}</li>" for e in r.errors) + "</ul>")
+        parts.append("<h2>Errores y avisos</h2><ul>" + "".join(f"<li>{_e(e)}</li>" for e in r.errors) + "</ul>")
+
+    top = top_findings(r.findings)
+    if top:
+        rows = "".join(
+            f"<tr><td>{i}</td><td><span class='badge' style='--c:{_HTML_COLOR[f.status]}'>{f.score}</span></td>"
+            f"<td>{_e(SOURCE_LABEL.get(f.source, f.source))}</td><td>{_e(f.name)}</td><td>{_e(why(f, 3))}</td></tr>"
+            for i, f in enumerate(top, 1)
+        )
+        parts.append(
+            "<h2>Prioriza esto primero</h2><table><tr><th>#</th><th>Score</th><th>Origen</th><th>Nombre</th>"
+            f"<th>Por qué</th></tr>{rows}</table>"
+        )
+    techniques = attack_summary(r.findings)
+    if techniques:
+        rows = "".join(
+            f"<tr><td><a href='{attack_url(t)}'>{_e(t)}</a></td><td>{_e(name)}</td><td>{n}</td></tr>"
+            for t, name, n in techniques
+        )
+        parts.append(
+            f"<h2>Técnicas MITRE ATT&amp;CK observadas</h2><table><tr><th>Técnica</th><th>Nombre</th>"
+            f"<th>Elementos</th></tr>{rows}</table>"
+        )
 
     for title, findings in r.sections.items():
         parts.append(f"<h2>{_e(title)} ({len(findings)})</h2>")
@@ -348,19 +463,20 @@ def render_html(r: TriageResult) -> str:
             continue
         rows = "".join(
             f"<tr><td><span class='badge' style='--c:{_HTML_COLOR[f.status]}'>{f.status.value}</span></td>"
-            f"<td>{_e(f.name)}</td><td><code>{_e(f.path)}</code></td><td>{_e(f.publisher)}<br>"
-            f"<span class='muted'>{_e(f.signature)}</span></td><td>{_e(f.vt_summary)}</td>"
+            f"<td><b>{f.score}</b></td><td>{_e(f.name)}</td><td><code>{_e(f.path)}</code></td>"
+            f"<td>{_e(why(f) or f.signature)}</td><td>{_e(f.vt_summary)}</td>"
             f"<td>{len(f.connections) or '—'}</td></tr>"
             for f in sort_findings(findings)
         )
         parts.append(
-            "<table><tr><th>Estado</th><th>Nombre</th><th>Ruta</th><th>Editor / firma</th><th>VT</th><th>Red</th></tr>"
-            f"{rows}</table>"
+            "<table><tr><th>Estado</th><th>Score</th><th>Nombre</th><th>Ruta</th><th>Por qué</th><th>VT</th>"
+            f"<th>Red</th></tr>{rows}</table>"
         )
         for f in sort_findings(findings):
             vt = f.vt or {}
             items = [
                 ("Ruta", f"<code>{_e(f.path)}</code>"),
+                ("Línea de comandos", f"<code>{_e(f.cmdline[:400])}</code>"),
                 ("Ubicación", f"<code>{_e(f.location)}</code>"),
                 ("Categoría", _e(f.category)),
                 ("Editor", _e(f.publisher)),
@@ -375,9 +491,19 @@ def render_html(r: TriageResult) -> str:
                 for x in f.connections
             ]
             dl = "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in items)
+            sig_rows = "".join(
+                f"<tr><td>{_e(x.title)}</td><td>{x.weight:+d}</td><td>{_e(x.attack)}</td>"
+                f"<td><code>{_e(x.evidence[:200])}</code></td></tr>"
+                for x in f.unique_signals
+            )
+            sig_table = (
+                f"<table><tr><th>Señal</th><th>Peso</th><th>ATT&amp;CK</th><th>Evidencia</th></tr>{sig_rows}</table>"
+                if sig_rows
+                else ""
+            )
             parts.append(
                 f"<details><summary><span class='badge' style='--c:{_HTML_COLOR[f.status]}'>{f.status.value}</span> "
-                f"{_e(f.name)}</summary><dl>{dl}</dl></details>"
+                f"{_e(f.name)} <span class='muted'>· score {f.score}</span></summary><dl>{dl}</dl>{sig_table}</details>"
             )
 
     conns = unique_connections(r.findings)

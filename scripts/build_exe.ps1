@@ -1,11 +1,12 @@
 # Genera dist\win11-triage-gui.exe (interfaz) y dist\win11-triage.exe (consola).
 # Uso: powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
 $ErrorActionPreference = "Stop"
-python -m pip install -e ".[build]"
+python -m pip install -e ".[build,yara]"
 
 $common = @("--noconfirm", "--onefile", "--clean",
             "--add-data", "win11_triage/samples;win11_triage/samples",
             "--add-data", "win11_triage/assets;win11_triage/assets",
+            "--add-data", "win11_triage/rules/yara;win11_triage/rules/yara",
             "--icon", "win11_triage/assets/icon.ico",
             "--collect-data", "customtkinter")
 

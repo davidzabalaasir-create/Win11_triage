@@ -94,6 +94,11 @@ class Finding:
         return sorted(best.values(), key=lambda x: -x.weight)
 
     @property
+    def raw_score(self) -> int:
+        """Suma sin saturar: desempata elementos con score 100."""
+        return sum(s.weight for s in self.unique_signals)
+
+    @property
     def score(self) -> int:
         return max(0, min(100, sum(s.weight for s in self.unique_signals)))
 
