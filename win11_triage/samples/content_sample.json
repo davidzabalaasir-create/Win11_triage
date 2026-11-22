@@ -1,0 +1,52 @@
+{
+  "_comment": "Resultados simulados de análisis de contenido (PE + YARA) para --dry-run, por ruta en minúsculas.",
+  "static": {
+    "c:\\users\\usuario\\appdata\\roaming\\onesync\\syncsvc.exe": [
+      {
+        "id": "PE_PACKER_SECTION",
+        "title": "Secciones de empaquetador conocido",
+        "weight": 25,
+        "attack": "T1027.002",
+        "evidence": "upx0, upx1"
+      },
+      {
+        "id": "PE_HIGH_ENTROPY",
+        "title": "Secciones con entropía muy alta (cifrado/empaquetado)",
+        "weight": 20,
+        "attack": "T1027.002",
+        "evidence": "1 sección(es) > 7.2"
+      }
+    ],
+    "c:\\users\\usuario\\appdata\\local\\microsoft\\svchost.exe": [
+      {
+        "id": "PE_INJECTION_IMPORTS",
+        "title": "Importa APIs de inyección en procesos",
+        "weight": 35,
+        "attack": "T1055",
+        "evidence": "CreateRemoteThread, VirtualAllocEx, WriteProcessMemory"
+      }
+    ]
+  },
+  "yara": {
+    "c:\\users\\usuario\\appdata\\roaming\\onesync\\syncsvc.exe": [
+      {
+        "rule": "W11T_PE_PackedUPX",
+        "meta": {
+          "description": "PE empaquetado con UPX (muchas herramientas legítimas también lo usan)",
+          "mitre": "T1027.002",
+          "weight": 15
+        }
+      }
+    ],
+    "c:\\users\\usuario\\appdata\\local\\microsoft\\svchost.exe": [
+      {
+        "rule": "W11T_PE_ProcessInjectionImports",
+        "meta": {
+          "description": "Imports clásicos de inyección en procesos remotos",
+          "mitre": "T1055",
+          "weight": 30
+        }
+      }
+    ]
+  }
+}

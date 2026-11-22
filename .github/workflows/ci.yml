@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install ruff
+      - run: ruff check .
+      - run: ruff format --check .
+
+  test:
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python: ["3.10", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -e ".[dev,yara]"
+      - name: Tests (Windows)
+        if: runner.os == 'Windows'
+        run: pytest -q
+      - name: Tests (Linux, con pantalla virtual para la GUI)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q xvfb
+          xvfb-run -a pytest -q
+      - name: Dry-run de humo
+        run: win11-triage --dry-run --no-color --format both --config-dir .
+
+  build-exe:
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: write  # solo para adjuntar los binarios a la release en tags v*
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Instalar Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Compilar aplicación e instalador
+        shell: pwsh
+        run: ./scripts/build_exe.ps1
+      - name: Instalar, abrir la app y desinstalar (prueba real)
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\win11-triage-setup-*.exe | Select-Object -First 1
+          $dir = Join-Path $env:RUNNER_TEMP "w11t-app"
+          $cfg = Join-Path $env:RUNNER_TEMP "w11t-cfg"
+          Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER","/DIR=$dir","/TASKS=" -Wait
+          if (-not (Test-Path "$dir\win11-triage-gui.exe")) { throw "La instalación no creó el ejecutable" }
+
+          & "$dir\win11-triage.exe" --dry-run --no-color --no-report --config-dir $cfg
+          if ($LASTEXITCODE) { throw "La versión de consola falló ($LASTEXITCODE)" }
+
+          $p = Start-Process "$dir\win11-triage-gui.exe" -ArgumentList "--selftest","--config-dir",$cfg -Wait -PassThru
+          Get-Content "$cfg\logs\win11-triage.log" -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { throw "La interfaz no arrancó correctamente (código $($p.ExitCode))" }
+
+          Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait
+          # El desinstalador se relanza desde %TEMP%: se espera a que termine de verdad.
+          for ($i = 0; $i -lt 30 -and (Test-Path "$dir\win11-triage-gui.exe"); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path "$dir\win11-triage-gui.exe") { throw "La desinstalación dejó ficheros" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win11-triage-windows
+          path: |
+            dist/win11-triage-setup-*.exe
+            dist/win11-triage-portable-*.zip
+      - name: Publicar release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/win11-triage-setup-*.exe
+            dist/win11-triage-portable-*.zip
+          generate_release_notes: true
