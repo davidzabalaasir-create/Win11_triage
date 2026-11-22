@@ -1,6 +1,12 @@
 .env
 vt_cache.json
+vt_cache.tmp
 reportes/
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+build/
+dist/
 .venv/
+.pytest_cache/
+.ruff_cache/

@@ -1,13 +1,17 @@
-"""Localización de las herramientas de Sysinternals."""
+"""Localización de las herramientas de Sysinternals y comprobaciones del sistema."""
+
 from __future__ import annotations
 
+import ctypes
 import os
+import platform
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
-TOOLS = {
+from .utils import expand_win_vars
+
+TOOLS: dict[str, dict[str, str]] = {
     "autorunsc.exe": {
         "winget": "Microsoft.Sysinternals.Autoruns",
         "url": "https://learn.microsoft.com/sysinternals/downloads/autoruns",
@@ -21,15 +25,15 @@ TOOLS = {
     "tcpvcon.exe": {
         "winget": "Microsoft.Sysinternals.TCPView",
         "url": "https://learn.microsoft.com/sysinternals/downloads/tcpview",
-        "used_by": "(reservado para conexiones de red)",
+        "used_by": "--network",
     },
 }
 
 
-@dataclass
+@dataclass(frozen=True)
 class ToolStatus:
     name: str
-    path: Optional[Path]
+    path: Path | None
     origin: str  # PATH | WinGet | SYSINTERNALS_DIR | ""
 
     @property
@@ -37,36 +41,53 @@ class ToolStatus:
         return self.path is not None
 
 
+def is_windows() -> bool:
+    return platform.system() == "Windows"
+
+
+def is_admin() -> bool:
+    """True si el proceso corre elevado (Windows) o como root (resto)."""
+    if is_windows():
+        try:
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined]
+        except (AttributeError, OSError):
+            return False
+    return hasattr(os, "geteuid") and os.geteuid() == 0
+
+
 def _candidates(name: str) -> list[str]:
+    """autorunsc.exe → [autorunsc.exe, autorunsc64.exe] (WinGet instala ambas)."""
     stem = name[:-4]
     return [name, f"{stem}64.exe"]
 
 
-def _search_dir(base: Path, name: str, recursive: bool) -> Optional[Path]:
+def _search_dir(base: Path, name: str, recursive: bool) -> Path | None:
     if not base.is_dir():
         return None
+    wanted = [c.lower() for c in _candidates(name)]
     for cand in _candidates(name):
-        direct = base / cand
-        if direct.is_file():
-            return direct
-        if recursive:
-            hits = sorted(p for p in base.rglob("*") if p.name.lower() == cand.lower())
-            if hits:
-                return hits[0]
+        if (base / cand).is_file():
+            return base / cand
+    if recursive:
+        hits = sorted(p for p in base.rglob("*.exe") if p.name.lower() in wanted)
+        if hits:
+            # Preferimos la variante que coincide exactamente con el nombre pedido.
+            hits.sort(key=lambda p: wanted.index(p.name.lower()))
+            return hits[0]
     return None
 
 
 def find_tool(name: str) -> ToolStatus:
     custom = os.environ.get("SYSINTERNALS_DIR")
     if custom:
-        hit = _search_dir(Path(os.path.expandvars(custom)), name, recursive=False)
+        hit = _search_dir(Path(expand_win_vars(custom)), name, recursive=False)
         if hit:
             return ToolStatus(name, hit, "SYSINTERNALS_DIR")
 
     for cand in _candidates(name):
-        p = shutil.which(cand)
-        if p:
-            return ToolStatus(name, Path(p), "PATH")
+        found = shutil.which(cand)
+        if found:
+            return ToolStatus(name, Path(found), "PATH")
 
     local = os.environ.get("LOCALAPPDATA")
     if local:
@@ -88,5 +109,6 @@ def install_hint(name: str) -> str:
     info = TOOLS[name]
     return (
         f"winget install --id {info['winget']} -e --accept-source-agreements\n"
-        f"  o descarga manual: {info['url']} (añade la carpeta al PATH o define SYSINTERNALS_DIR en .env)"
+        f"o descarga manual: {info['url']}\n"
+        "(añade la carpeta al PATH o define SYSINTERNALS_DIR en .env)"
     )

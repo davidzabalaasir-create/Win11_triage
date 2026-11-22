@@ -1,3 +1,4 @@
+# Dependencias de ejecución (equivalente a: pip install .)
 rich>=13.7
 requests>=2.31
 python-dotenv>=1.0
