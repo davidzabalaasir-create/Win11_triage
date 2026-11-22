@@ -37,9 +37,9 @@ def test_engine_dry_run_reports_progress(tmp_path):
     rec = Recorder()
     res = TriageEngine(opts, _tools(), rec).run()
     assert res.modules == ["autoruns", "scan-user", "network", "vt"]
-    assert res.counts()[Status.DETECTED] == 3
-    assert ("vt_start", 5, 0, 5) in rec.events
-    assert sum(1 for e in rec.events if e[0] == "vt_progress") == 5
+    assert res.counts()[Status.DETECTED] == 8
+    assert ("vt_start", 10, 0, 10) in rec.events
+    assert sum(1 for e in rec.events if e[0] == "vt_progress") == 10
     assert any(e[0] == "info" and "conexiones" in e[1] for e in rec.events)
 
 

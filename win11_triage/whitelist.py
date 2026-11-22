@@ -11,9 +11,10 @@ from .models import Finding
 from .utils import expand_win_vars
 
 TEMPLATE = {
-    "_comment": "Rutas (admiten * y %VAR%) y hashes SHA-256 que consideras seguros.",
+    "_comment": "Rutas (admiten * y %VAR%), hashes SHA-256 y editores que consideras seguros.",
     "paths": [],
     "hashes": [],
+    "publishers": [],
 }
 
 
@@ -26,12 +27,15 @@ class WhitelistError(ValueError):
 
 
 class Whitelist:
-    def __init__(self, paths: list[str] | None = None, hashes: list[str] | None = None) -> None:
+    def __init__(
+        self, paths: list[str] | None = None, hashes: list[str] | None = None, publishers: list[str] | None = None
+    ) -> None:
         self.paths = [_norm(p) for p in (paths or []) if p]
         self.hashes = {h.strip().lower() for h in (hashes or []) if h}
+        self.publishers = {p.strip().lower() for p in (publishers or []) if p}
 
     def __len__(self) -> int:
-        return len(self.paths) + len(self.hashes)
+        return len(self.paths) + len(self.hashes) + len(self.publishers)
 
     @classmethod
     def load(cls, file: Path, create: bool = True) -> Whitelist:
@@ -45,10 +49,13 @@ class Whitelist:
             raise WhitelistError(f"{file.name} no es JSON válido: {e}") from e
         if not isinstance(data, dict):
             raise WhitelistError(f"{file.name} debe ser un objeto con 'paths' y 'hashes'")
-        return cls(data.get("paths", []), data.get("hashes", []))
+        return cls(data.get("paths", []), data.get("hashes", []), data.get("publishers", []))
 
     def matches(self, f: Finding) -> bool:
         if f.sha256 and f.sha256.lower() in self.hashes:
+            return True
+        # Por editor solo si la firma es válida: un editor sin firma se puede falsificar.
+        if f.signed_ok and f.publisher.strip().lower() in self.publishers:
             return True
         p = _norm(f.path)
         if not p:

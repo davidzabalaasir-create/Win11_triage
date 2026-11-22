@@ -8,9 +8,11 @@ import io
 import logging
 import os
 import subprocess
+from datetime import datetime
 from pathlib import Path, PureWindowsPath
 
 from .models import Connection, Finding
+from .rules.heuristics import HIJACK_CATEGORIES, has_lolbin
 from .utils import expand_win_vars
 
 log = logging.getLogger(__name__)
@@ -113,7 +115,12 @@ def parse_autoruns(text: str) -> list[Finding]:
         if not entry:
             continue  # filas de cabecera de sección (solo la ubicación)
         signer = row.get("Signer", "")
-        if not is_non_microsoft(signer):
+        launch = row.get("Launch String", "")
+        category = row.get("Category", "")
+        # Se descarta lo firmado por Microsoft salvo que se use de forma sospechosa: un LOLBin
+        # (mshta, powershell…) con argumentos peligrosos o una categoría de secuestro (WMI, IFEO).
+        keep = is_non_microsoft(signer) or category.strip().lower() in HIJACK_CATEGORIES or has_lolbin(launch)
+        if not keep:
             continue
         path = _get(row, "Image Path", "Launch String")
         findings.append(
@@ -124,9 +131,10 @@ def parse_autoruns(text: str) -> list[Finding]:
                 publisher=_clean(_get(row, "Company", "Signer")) or "(desconocido)",
                 signature=signer or "(sin firma)",
                 sha256=_get(row, "SHA-256", "SHA256").lower(),
-                category=row.get("Category", ""),
+                category=category,
                 location=row.get("Entry Location", ""),
                 signed_ok=signer.lower().startswith("(verified)"),
+                cmdline=launch,
             )
         )
     return findings
@@ -173,9 +181,16 @@ def collect_sigcheck(exe: Path, folder: Path) -> list[Finding]:
 
 
 def _fill_missing_hashes(findings: list[Finding]) -> None:
+    """Completa SHA-256 y fecha de creación del fichero cuando Sysinternals no los da."""
     for f in findings:
         if not f.sha256 and f.path:
             f.sha256 = sha256_file(f.path)
+        if not f.created and f.path:
+            try:
+                ctime = os.path.getctime(expand_win_vars(f.path.strip('"')))
+                f.created = datetime.fromtimestamp(ctime).isoformat(timespec="seconds")
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------- tcpvcon

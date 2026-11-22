@@ -2,6 +2,8 @@
 
 No escribe en pantalla: comunica el progreso a través de un :class:`Reporter`,
 que cada interfaz implementa a su manera (Rich en la terminal, cola de eventos en la GUI).
+
+Flujo: colectores → lista blanca → reglas → red → contenido (PE/YARA) → VirusTotal → veredicto.
 """
 
 from __future__ import annotations
@@ -16,18 +18,23 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from . import collectors, env_check
-from .models import Cancelled, Finding
+from . import collectors, collectors_events, collectors_live, env_check
+from .enrich import eligible, file_of, pe_static, yara_scan
+from .models import Cancelled, Finding, Signal
 from .report import TriageResult
+from .rules import apply_rules, apply_vt
 from .virustotal import FREE_TIER_INTERVAL, VTAuthError, VTClient, VTResult
 from .whitelist import Whitelist
 
 SAMPLES = Path(__file__).resolve().parent / "samples"
 PLACEHOLDER_KEY = "pon_aqui_tu_api_key"
 
-SECTION_AUTORUNS = "Persistencia (Autoruns) — no Microsoft / no verificado"
-SECTION_SIGCHECK = "Rutas de usuario (Sigcheck) — sin firma válida"
+SECTION_AUTORUNS = "Persistencia (Autoruns)"
+SECTION_SIGCHECK = "Carpetas de usuario (Sigcheck) — sin firma válida"
+SECTION_PROCESSES = "Procesos en ejecución — sospechosos"
+SECTION_EVENTS = "Eventos de Windows — servicios, tareas y Defender"
 
 
 def default_config_dir() -> Path:
@@ -43,20 +50,24 @@ def default_config_dir() -> Path:
 class TriageOptions:
     autoruns: bool = False
     scan_user: bool = False
+    processes: bool = False
+    events: bool = False
     network: bool = False
+    static: bool = False
     vt: bool = False
     dry_run: bool = False
     vt_limit: int | None = None
+    event_days: int = 7
     config_dir: Path | None = None
 
     def __post_init__(self) -> None:
         self.config_dir = (self.config_dir or default_config_dir()).resolve()
-        if (self.vt or self.network) and not (self.autoruns or self.scan_user):
-            self.autoruns = self.scan_user = True  # VT y red necesitan hallazgos de los que partir
+        if (self.vt or self.network or self.static) and not self.any_collector:
+            self.autoruns = self.scan_user = True  # necesitan hallazgos de los que partir
 
     @property
     def any_collector(self) -> bool:
-        return self.autoruns or self.scan_user
+        return self.autoruns or self.scan_user or self.processes or self.events
 
     @property
     def required_tools(self) -> set[str]:
@@ -66,7 +77,7 @@ class TriageOptions:
 
     @property
     def whitelist_file(self) -> Path:
-        return SAMPLES / "whitelist_sample.json" if self.dry_run else self.config_dir / "whitelist.json"
+        return SAMPLES / "whitelist_sample.json" if self.dry_run else self.config_dir / "whitelist.json"  # type: ignore[operator]
 
 
 class Reporter:
@@ -96,18 +107,21 @@ def sample_text(name: str) -> str:
     return (SAMPLES / name).read_text(encoding="utf-8")
 
 
-def _dry_autoruns() -> list[Finding]:
-    # Se pasa por UTF-16 para ejercitar el mismo decodificador que con autorunsc real.
-    return collectors.parse_autoruns(collectors.decode_output(sample_text("autorunsc_sample.csv").encode("utf-16")))
-
-
-def _dry_sigcheck() -> list[Finding]:
-    return collectors.parse_sigcheck(sample_text("sigcheck_sample.csv"), "(muestra)")
+def _sample_json(name: str) -> dict[str, Any]:
+    return json.loads(sample_text(name))
 
 
 def _dry_vt_simulator() -> Callable[[str], VTResult]:
-    data = json.loads(sample_text("vt_responses.json"))
+    data = _sample_json("vt_responses.json")
     return lambda h: dict(data.get(h, {"found": False}))
+
+
+def share_hashes(findings: list[Finding]) -> None:
+    """Propaga el SHA-256 entre hallazgos que apuntan al mismo fichero (proceso/evento ← autoruns/sigcheck)."""
+    known = {f.path.strip().strip('"').lower(): f.sha256 for f in findings if f.sha256 and f.path}
+    for f in findings:
+        if not f.sha256 and f.path:
+            f.sha256 = known.get(f.path.strip().strip('"').lower(), "")
 
 
 # ----------------------------------------------------------------- motor
@@ -123,6 +137,8 @@ class TriageEngine:
         self.tools = tools
         self.r = reporter or Reporter()
         self.cancel = cancel or threading.Event()
+        self._procs: dict[int, collectors_live.ProcInfo] | None = None
+        self._conns: list | None = None
 
     def _check_cancel(self) -> None:
         if self.cancel.is_set():
@@ -142,6 +158,8 @@ class TriageEngine:
         plan = (
             ("autoruns", self.opts.autoruns, SECTION_AUTORUNS, self._autoruns),
             ("scan-user", self.opts.scan_user, SECTION_SIGCHECK, self._sigcheck),
+            ("processes", self.opts.processes, SECTION_PROCESSES, self._processes),
+            ("events", self.opts.events, SECTION_EVENTS, self._events),
         )
         for module, enabled, section, fn in plan:
             if not enabled:
@@ -159,14 +177,22 @@ class TriageEngine:
             res.whitelisted += skipped
             res.sections[section] = found
 
+        apply_rules(res.findings)
+
         if self.opts.network:
             self._check_cancel()
             res.modules.append("network")
             self._network(res)
+        if self.opts.static:
+            self._check_cancel()
+            res.modules.append("static")
+            self._static(res)
+        share_hashes(res.findings)
         if self.opts.vt:
             self._check_cancel()
             res.modules.append("vt")
             self._vt(res)
+        apply_vt(res.findings)
         res.finished = datetime.now()
         return res
 
@@ -174,16 +200,17 @@ class TriageEngine:
         res.errors.append(msg)
         self.r.error(msg)
 
-    # --------------------------------------------------------- módulos
+    # --------------------------------------------------------- colectores
     def _autoruns(self, res: TriageResult) -> list[Finding]:
         if self.opts.dry_run:
-            return _dry_autoruns()
+            raw = sample_text("autorunsc_sample.csv").encode("utf-16")  # mismo decodificador que el real
+            return collectors.parse_autoruns(collectors.decode_output(raw))
         self.r.stage("Ejecutando autorunsc (puede tardar varios minutos)…")
         return collectors.collect_autoruns(self.tools["autorunsc.exe"].path)  # type: ignore[arg-type]
 
     def _sigcheck(self, res: TriageResult) -> list[Finding]:
         if self.opts.dry_run:
-            return _dry_sigcheck()
+            return collectors.parse_sigcheck(sample_text("sigcheck_sample.csv"), "(muestra)")
         found: list[Finding] = []
         for folder in collectors.user_scan_targets():
             self._check_cancel()
@@ -196,26 +223,114 @@ class TriageEngine:
                 self._fail(res, str(e))
         return found
 
-    def _network(self, res: TriageResult) -> None:
+    def _snapshot(self) -> tuple[dict[int, collectors_live.ProcInfo], list]:
+        """Procesos y conexiones (una sola captura compartida por --processes y --network)."""
+        if self._procs is None:
+            if self.opts.dry_run:
+                self._procs, self._conns = collectors_live.parse_sample(_sample_json("processes_sample.json"))
+            else:
+                self.r.stage("Capturando procesos y conexiones…")
+                self._procs = collectors_live.snapshot_processes()
+                self._conns = collectors_live.snapshot_connections(self._procs)
+        return self._procs, self._conns or []
+
+    def _processes(self, res: TriageResult) -> list[Finding]:
+        if not collectors_live.available():
+            self._fail(res, "psutil no está instalado: se omite el análisis de procesos")
+            return []
+        procs, _ = self._snapshot()
+        found = collectors_live.process_findings(procs, compute_hashes=not self.opts.dry_run)
+        self.r.info(f"Procesos: {len(procs)} en ejecución · {len(found)} con indicios sospechosos.")
+        return found
+
+    def _events(self, res: TriageResult) -> list[Finding]:
         if self.opts.dry_run:
-            conns = collectors.parse_tcpvcon(sample_text("tcpvcon_sample.csv"))
+            events = collectors_events.parse_events(sample_text("events_sample.xml"))
+            found = [f for f in map(collectors_events.event_to_finding, events) if f]
         else:
-            exe = self.tools["tcpvcon.exe"].path
-            if exe is None:
-                self._fail(res, "tcpvcon.exe no encontrado: se omite el módulo de red")
-                return
-            self.r.stage("Ejecutando tcpvcon…")
+            self.r.stage(f"Leyendo eventos de los últimos {self.opts.event_days} días…")
+            found, warnings = collectors_events.collect_events(self.opts.event_days)
+            for w in warnings:
+                res.errors.append(w)
+                self.r.warn(w)
+        self.r.info(f"Eventos: {len(found)} relevantes (servicios, tareas, Defender).")
+        return found
+
+    # --------------------------------------------------------- red
+    def _network(self, res: TriageResult) -> None:
+        if collectors_live.available():
             try:
-                conns = collectors.collect_tcpvcon(exe)
-            except collectors.CollectorError as e:
-                self._fail(res, str(e))
+                procs, conns = self._snapshot()
+            except Exception as e:
+                self.r.warn(f"psutil no pudo leer las conexiones ({e}); se usa tcpvcon.")
+            else:
+                res.connections = conns
+                matched = collectors_live.attach_connections(res.findings, conns, procs)
+                self.r.info(f"Red: {len(conns)} conexiones externas · {matched} hallazgo(s) con conexiones (por PID).")
                 return
-            finally:
-                self.r.done()
+        self._network_tcpvcon(res)
+
+    def _network_tcpvcon(self, res: TriageResult) -> None:
+        exe = self.tools["tcpvcon.exe"].path
+        if exe is None:
+            self._fail(res, "Ni psutil ni tcpvcon disponibles: se omite el módulo de red")
+            return
+        self.r.stage("Ejecutando tcpvcon…")
+        try:
+            conns = collectors.collect_tcpvcon(exe)
+        except collectors.CollectorError as e:
+            self._fail(res, str(e))
+            return
+        finally:
+            self.r.done()
         res.connections = conns
         matched = collectors.correlate_connections(res.findings, conns)
-        self.r.info(f"Red: {len(conns)} conexiones activas · {matched} hallazgo(s) con conexiones.")
+        for f in res.findings:
+            if f.connections:
+                f.signals.append(
+                    Signal("NET_ACTIVE", "Conexiones de red activas", 10, "T1071", f.connections[0].remote)
+                )
+        self.r.info(f"Red: {len(conns)} conexiones · {matched} hallazgo(s) con conexiones (por nombre, tcpvcon).")
 
+    # --------------------------------------------------------- contenido
+    def _static(self, res: TriageResult) -> None:
+        targets = [f for f in res.findings if eligible(f)]
+        if self.opts.dry_run:
+            sim = _sample_json("content_sample.json")
+            for f in targets:
+                key = f.path.strip().strip('"').lower()
+                f.signals += [Signal(**d) for d in sim["static"].get(key, [])]
+                f.signals += [yara_scan.match_to_signal(m["rule"], m["meta"]) for m in sim["yara"].get(key, [])]
+            self.r.info(f"Contenido: {len(targets)} elemento(s) analizados (simulado).")
+            return
+
+        scanner = None
+        if yara_scan.available():
+            try:
+                scanner = yara_scan.YaraScanner(self.opts.config_dir / "yara")  # type: ignore[operator]
+            except Exception as e:
+                self._fail(res, f"YARA: no se pudieron compilar las reglas ({e})")
+        else:
+            self.r.warn('YARA no disponible (pip install "win11-triage[yara]"): solo análisis PE.')
+        seen: dict[Path, list[Signal]] = {}
+        analysed = 0
+        for i, f in enumerate(targets, 1):
+            self._check_cancel()
+            path = file_of(f)
+            if path is None:
+                continue
+            if path not in seen:
+                self.r.stage(f"Analizando contenido {i}/{len(targets)}: {path.name}")
+                sigs = pe_static.pe_signals(path)
+                if scanner is not None:
+                    sigs += scanner.scan(path)
+                seen[path] = sigs
+                analysed += 1
+            f.signals += seen[path]
+        self.r.done()
+        self.r.info(f"Contenido: {analysed} fichero(s) analizados (PE{' + YARA' if scanner else ''}).")
+
+    # --------------------------------------------------------- VirusTotal
     def _vt(self, res: TriageResult) -> None:
         api_key = os.environ.get("VT_API_KEY", "").strip()
         if not self.opts.dry_run and api_key in ("", PLACEHOLDER_KEY):

@@ -17,7 +17,9 @@ def test_status_rules():
 
 def test_dry_run_enables_all_modules(tmp_path):
     a = cli.parse_args(["--dry-run", "--config-dir", str(tmp_path)])
-    assert a.autoruns and a.scan_user and a.network and a.vt
+    o = a.options
+    assert o.autoruns and o.scan_user and o.processes and o.events and o.network and o.static and o.vt
+    assert o.event_days == 7
     assert a.output_dir == tmp_path.resolve() / "reportes"
 
 
@@ -39,7 +41,7 @@ def test_dry_run_end_to_end(tmp_path):
 
     data = json.loads(reports[0].read_text(encoding="utf-8"))
     assert data["dry_run"] is True
-    assert data["summary"] == {"DETECTADO": 3, "DESCONOCIDO": 1, "LIMPIO": 2}
+    assert data["summary"] == {"DETECTADO": 15, "DESCONOCIDO": 1, "LIMPIO": 2}
     assert data["whitelisted"] == 1
     assert data["findings"][0]["status"] == "DETECTADO"
 
@@ -54,7 +56,7 @@ def test_dry_run_vt_limit_skips_queries(tmp_path):
     cli.main(["--dry-run", "--vt-limit", "1", "--config-dir", str(tmp_path), "--format", "json", "--no-color"])
     data = json.loads(next((tmp_path / "reportes").glob("*.json")).read_text(encoding="utf-8"))
     assert data["vt_stats"]["network"] == 1
-    assert data["vt_stats"]["skipped"] == 4
+    assert data["vt_stats"]["skipped"] == 9
 
 
 def test_missing_tools_exit_code(tmp_path, monkeypatch):
@@ -94,8 +96,9 @@ def test_html_report_and_json_roundtrip(tmp_path):
 
     loaded = report.load_json(files[".json"])
     assert loaded.dry_run and loaded.finished is not None
-    assert {s.value: n for s, n in loaded.counts().items()} == {"DETECTADO": 3, "DESCONOCIDO": 1, "LIMPIO": 2}
-    assert sum(len(f.connections) for f in loaded.findings) == 5
+    assert {s.value: n for s, n in loaded.counts().items()} == {"DETECTADO": 15, "DESCONOCIDO": 1, "LIMPIO": 2}
+    assert sum(len(f.connections) for f in loaded.findings) == 14
+    assert any(s.id == "CMD_PS_ENCODED" for f in loaded.findings for s in f.signals)
 
 
 def test_html_escapes_untrusted_values():
@@ -107,3 +110,10 @@ def test_html_escapes_untrusted_values():
     r = TriageResult("h", "u", datetime.now(), False, False, {}, sections={"S": [f]})
     out = render_html(r)
     assert "<img src=x" not in out and "&lt;img src=x" in out
+
+
+def test_events_flag_days(tmp_path):
+    a = cli.parse_args(["--events", "30", "--config-dir", str(tmp_path)])
+    assert a.options.events and a.options.event_days == 30 and not a.options.autoruns
+    b = cli.parse_args(["--events", "--config-dir", str(tmp_path)])
+    assert b.options.event_days == 7

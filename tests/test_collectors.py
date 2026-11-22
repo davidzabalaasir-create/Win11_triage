@@ -37,7 +37,8 @@ def test_is_non_microsoft(signer, expected):
 
 def test_parse_autoruns_filters_microsoft_and_section_rows(autoruns_findings):
     names = {f.name for f in autoruns_findings}
-    assert "SecurityHealth" not in names
+    assert "SecurityHealth" not in names and "OneDrive" not in names  # Microsoft sin abuso: fuera
+    assert {"UpdChk", "WinUpdateHelper", "sethc.exe"} <= names  # Microsoft usado de forma sospechosa: dentro
     assert {"OneSyncHelper", "\\UpdaterCheck", "\\GoogleUpdateTaskMachineUA"} <= names
     assert all(len(f.sha256) == 64 for f in autoruns_findings)
 
@@ -50,7 +51,7 @@ def test_parse_autoruns_marks_third_party_signatures(autoruns_findings):
 
 
 def test_parse_sigcheck_skips_signed_and_resolves_publisher(sigcheck_findings):
-    assert len(sigcheck_findings) == 3
+    assert len(sigcheck_findings) == 5
     by_name = {f.name: f for f in sigcheck_findings}
     assert by_name["helper.dll"].publisher == "Helper Inc"
     assert by_name["setup_tmp.exe"].publisher == "(desconocido)"

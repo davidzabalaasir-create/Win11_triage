@@ -14,7 +14,7 @@ from rich.table import Table
 
 from . import __version__
 from .env_check import ToolStatus
-from .models import Connection, Finding, Status
+from .models import Connection, Finding, Signal, Status
 
 
 @dataclass
@@ -232,9 +232,11 @@ def to_json(r: TriageResult) -> dict[str, Any]:
 
 
 def _finding_from_dict(d: dict[str, Any]) -> Finding:
-    fields = {k: d.get(k) for k in Finding.__dataclass_fields__ if k in d and k != "connections"}
+    skip = {"connections", "signals"}
+    fields = {k: d.get(k) for k in Finding.__dataclass_fields__ if k in d and k not in skip}
     f = Finding(**fields)
     f.connections = [Connection(**c) for c in d.get("connections") or []]
+    f.signals = [Signal(**x) for x in d.get("signals") or []]
     return f
 
 

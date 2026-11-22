@@ -39,7 +39,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=r"ejecutables/DLL sin firma en %%LOCALAPPDATA%%\Temp y %%APPDATA%% (sigcheck)",
     )
-    mod.add_argument("--network", action="store_true", help="correlaciona hallazgos con conexiones activas (tcpvcon)")
+    mod.add_argument("--processes", action="store_true", help="procesos en ejecución sospechosos (psutil)")
+    mod.add_argument(
+        "--events",
+        nargs="?",
+        const=7,
+        type=int,
+        metavar="DÍAS",
+        help="eventos 7045/4698 y detecciones de Defender de los últimos DÍAS (por defecto 7)",
+    )
+    mod.add_argument("--network", action="store_true", help="conexiones activas por PID (psutil; tcpvcon de respaldo)")
+    mod.add_argument(
+        "--static", action="store_true", help="análisis de contenido: PE (pefile) y YARA si está instalado"
+    )
     mod.add_argument("--vt", action="store_true", help="consulta los SHA-256 en VirusTotal (requiere VT_API_KEY)")
     mod.add_argument("--all", action="store_true", help="activa todos los módulos")
 
@@ -78,11 +90,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     a = p.parse_args(argv)
     if a.vt_limit is not None and a.vt_limit < 0:
         p.error("--vt-limit debe ser >= 0")
-    if a.all or (a.dry_run and not (a.autoruns or a.scan_user or a.network or a.vt)):
-        a.autoruns = a.scan_user = a.network = a.vt = True
+    modules = ("autoruns", "scan_user", "processes", "network", "static", "vt")
+    if a.all or (a.dry_run and not any(getattr(a, m) for m in modules) and a.events is None):
+        for m in modules:
+            setattr(a, m, True)
+        a.events = a.events or 7
     a.options = TriageOptions(
         autoruns=a.autoruns,
         scan_user=a.scan_user,
+        processes=a.processes,
+        events=a.events is not None,
+        event_days=a.events or 7,
+        static=a.static,
         network=a.network,
         vt=a.vt,
         dry_run=a.dry_run,
@@ -205,8 +224,8 @@ def run(args: argparse.Namespace) -> int:
 
     if not opts.any_collector:
         console.print(
-            "\nElige un módulo: [bold]--autoruns[/], [bold]--scan-user[/], [bold]--network[/], "
-            "[bold]--vt[/] o [bold]--all[/]. También: [bold]--gui[/] (ayuda: --help)."
+            "\nElige módulos: [bold]--autoruns --scan-user --processes --events --network --static --vt[/] "
+            "o [bold]--all[/]. También: [bold]--gui[/] (ayuda: --help)."
         )
         return EXIT_OK if env_ok else EXIT_ENV
     if not opts.dry_run and not (env_ok and windows):
