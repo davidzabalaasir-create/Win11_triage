@@ -129,7 +129,11 @@ jobs:
           $p = Start-Process msiexec.exe -ArgumentList "/i",$msi,"/qn","/norestart","/l*v",$log -Wait -PassThru
           if ($p.ExitCode -ne 0) { Get-Content $log -Tail 60; throw "msiexec /i falló ($($p.ExitCode))" }
           $dir = "$env:ProgramFiles\win11-triage"
-          if (-not (Test-Path "$dir\win11-triage-gui.exe")) { throw "El MSI no instaló el ejecutable" }
+          if (-not (Test-Path "$dir\win11-triage-gui.exe")) {
+            Get-ChildItem "$env:ProgramFiles\win11-triage", "${env:ProgramFiles(x86)}\win11-triage" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 30 FullName
+            Select-String -Path $log -Pattern "INSTALLFOLDER|InstallFiles|Note: 1:" | Select-Object -First 30
+            throw "El MSI no instaló el ejecutable"
+          }
           $cfg = Join-Path $env:RUNNER_TEMP "w11t-msi-cfg"
           $g = Start-Process "$dir\win11-triage-gui.exe" -ArgumentList "--selftest","--config-dir",$cfg -Wait -PassThru
           if ($g.ExitCode -ne 0) { Get-Content "$cfg\logs\win11-triage.log"; throw "La app instalada con MSI no arrancó" }

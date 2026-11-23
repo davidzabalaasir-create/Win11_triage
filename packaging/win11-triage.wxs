@@ -3,7 +3,7 @@
   Instalador MSI de win11-triage (WiX Toolset v5).
   Compilar (desde la raíz del repositorio, tras PyInstaller):
     wix build packaging\win11-triage.wxs -arch x64 -ext WixToolset.UI.wixext
-        -d Version=2.0.0 -bindpath app=dist\win11-triage -o dist\win11-triage-2.0.0.msi
+        -d Version=2.0.0 -o dist\win11-triage-2.0.0.msi
   Para despliegues silenciosos (GPO, Intune, SCCM):  msiexec /i win11-triage-2.0.0.msi /qn
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
@@ -31,7 +31,8 @@
 
     <!-- Todo el contenido generado por PyInstaller (dist\win11-triage). -->
     <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
-      <Files Include="!(bindpath.app)\**" />
+      <!-- Ruta relativa a este .wxs: dist\win11-triage generado por PyInstaller. -->
+      <Files Include="..\dist\win11-triage\**" />
     </ComponentGroup>
 
     <StandardDirectory Id="ProgramMenuFolder">

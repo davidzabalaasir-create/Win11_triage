@@ -66,9 +66,11 @@ if ($iscc) {
 # Instalador .msi (WiX)
 if (Get-Command wix -ErrorAction SilentlyContinue) {
     wix build packaging\win11-triage.wxs -arch x64 -ext WixToolset.UI.wixext `
-        -d "Version=$version" -bindpath "app=dist\win11-triage" -o "dist\win11-triage-$version.msi"
+        -d "Version=$version" -o "dist\win11-triage-$version.msi"
     if ($LASTEXITCODE) { throw "WiX falló" }
     Remove-Item "dist\win11-triage-$version.wixpdb" -ErrorAction SilentlyContinue
+    $msiMB = (Get-Item "dist\win11-triage-$version.msi").Length / 1MB
+    if ($msiMB -lt 5) { throw "El MSI ocupa $([math]::Round($msiMB, 2)) MB: no contiene la aplicación (¿no se encontraron los archivos?)" }
     Sign-File "dist\win11-triage-$version.msi"
 } else {
     Write-Warning "WiX no encontrado: se omite el .msi (dotnet tool install -g wix --version 5.0.2)."
