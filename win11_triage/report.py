@@ -12,7 +12,7 @@ from typing import Any
 
 from rich.table import Table
 
-from . import __version__
+from . import __copyright__, __version__
 from .env_check import ToolStatus
 from .models import Connection, Finding, Signal, Status
 from .rules.attack import attack_url, technique_name
@@ -291,6 +291,8 @@ def render_markdown(r: TriageResult) -> str:
         "_Leyenda: 🔴 VirusTotal ≥ 1 motor o score ≥ 70 · 🟡 score 30–69 o sin firma · "
         "🟢 score < 30 con firma válida o VirusTotal limpio. Herramienta de triaje: no sustituye a un antivirus._",
         "",
+        f"_win11-triage {__version__} · {__copyright__} · Licencia MIT_",
+        "",
     ]
     return "\n".join(L)
 
@@ -520,7 +522,7 @@ def render_html(r: TriageResult) -> str:
         )
     parts.append(
         "<footer>🔴 detectado por VirusTotal · 🟡 sin firma / desconocido · 🟢 limpio o firma válida de terceros. "
-        "Herramienta de triaje: no sustituye a un antivirus.</footer></main></body></html>"
+        f"Herramienta de triaje: no sustituye a un antivirus.<br>win11-triage {__version__} · {__copyright__} · Licencia MIT</footer></main></body></html>"
     )
     return "".join(parts)
 
