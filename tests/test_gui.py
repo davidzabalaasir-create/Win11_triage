@@ -1,6 +1,7 @@
 """Pruebas de humo de la interfaz: se omiten si no hay Tk o pantalla disponible."""
 
 import csv
+import gc
 import time
 
 import pytest
@@ -21,6 +22,7 @@ def app(tmp_path):
     a.var_dry.set(True)
     yield a
     a.destroy()
+    gc.collect()  # libera los objetos de Tk en el hilo principal, no en un hilo de un análisis posterior
 
 
 def _pump_until(app, cond, timeout=20):
@@ -207,6 +209,7 @@ def test_english_interface(tmp_path):
         assert any("Settings" in x for x in texts)
     finally:
         a.destroy()
+        gc.collect()
         i18n.set_language("es")
 
 
@@ -224,3 +227,13 @@ def test_assistant_page(app, monkeypatch):
     app.ask_agent()
     _pump_until(app, lambda: "Lo más grave" in app.chat_box.get("1.0", "end"))
     assert str(app.chat_send.cget("state")) == "normal"
+
+
+def test_gc_paused_only_while_scanning(app):
+    import gc
+
+    assert gc.isenabled()
+    app.start()
+    assert not gc.isenabled()  # los hilos del análisis no liberan objetos de Tk
+    _pump_until(app, lambda: app.result is not None and not app.worker.is_alive())
+    assert gc.isenabled()
