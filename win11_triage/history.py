@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from ..models import Finding
+from .models import Finding
 
 
 @dataclass
@@ -31,7 +31,10 @@ class HistoryEntry:
 
 def finding_key(source: str, path: str, sha256: str, name: str = "") -> str:
     """Identidad estable de un hallazgo entre ejecuciones (para detectar novedades)."""
-    return f"{source}|{(path or name).strip().strip(chr(34)).lower()}|{(sha256 or '').lower()}"
+    ident = (path or name).strip().strip(chr(34)).lower()
+    if source == "sigma":  # varias reglas pueden coincidir en el mismo binario
+        ident = f"{name.lower()}|{ident}"
+    return f"{source}|{ident}|{(sha256 or '').lower()}"
 
 
 def key_of(f: Finding) -> str:

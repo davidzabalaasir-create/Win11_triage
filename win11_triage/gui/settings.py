@@ -25,6 +25,10 @@ DEFAULTS: dict[str, Any] = {
     "format": "HTML",
     "geometry": "",
     "appearance": "Oscuro",
+    "notify": True,
+    "alert_new": True,
+    "schedule": "Desactivado",
+    "schedule_at": "09:00",
 }
 
 
@@ -36,7 +40,17 @@ def load(config_dir: Path) -> dict[str, Any]:
         return data
     if isinstance(stored, dict):
         data["modules"].update({k: bool(v) for k, v in stored.get("modules", {}).items() if k in data["modules"]})
-        for key in ("event_days", "vt_limit", "format", "geometry", "appearance"):
+        for key in (
+            "event_days",
+            "vt_limit",
+            "format",
+            "geometry",
+            "appearance",
+            "notify",
+            "alert_new",
+            "schedule",
+            "schedule_at",
+        ):
             if key in stored:
                 data[key] = stored[key]
     return data

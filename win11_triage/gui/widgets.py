@@ -596,12 +596,19 @@ class Modal(ctk.CTkToplevel):
 class SecretDialog(Modal):
     """Pide la API key sin mostrarla en claro."""
 
-    def __init__(self, master: ctk.CTk, current: str) -> None:
-        super().__init__(master, "Clave de VirusTotal", "500x250")
+    def __init__(
+        self,
+        master: ctk.CTk,
+        current: str,
+        service: str = "VirusTotal",
+        url: str = "https://www.virustotal.com/gui/my-apikey",
+        label: str = "API key",
+    ) -> None:
+        super().__init__(master, f"Clave de {service}", "500x250")
         self.value: str | None = None
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=SPACE["xl"], pady=SPACE["xl"])
-        ctk.CTkLabel(body, text="API key de VirusTotal", font=font("subtitle")).pack(anchor="w")
+        ctk.CTkLabel(body, text=f"{label} de {service}", font=font("subtitle")).pack(anchor="w")
         ctk.CTkLabel(
             body,
             text="Se guarda solo en el archivo .env de tu carpeta de configuración.",
@@ -621,9 +628,7 @@ class SecretDialog(Modal):
             self.entry.insert(0, current)
         actions = ctk.CTkFrame(body, fg_color="transparent")
         actions.pack(fill="x", side="bottom")
-        ghost_button(
-            actions, "Obtener clave gratis ↗", lambda: webbrowser.open("https://www.virustotal.com/gui/my-apikey")
-        ).pack(side="left")
+        ghost_button(actions, "Obtener clave gratis ↗", lambda: webbrowser.open(url)).pack(side="left")
         primary_button(actions, "Guardar", self._ok, width=110).pack(side="right")
         secondary_button(actions, "Cancelar", self.destroy, width=110).pack(side="right", padx=SPACE["s"])
         self.entry.bind("<Return>", lambda _e: self._ok())

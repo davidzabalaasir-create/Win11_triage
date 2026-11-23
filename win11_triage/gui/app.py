@@ -13,6 +13,7 @@ import contextlib
 import copy
 import logging
 import os
+import platform
 import queue
 import subprocess
 import sys
@@ -26,9 +27,10 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Any
 
 import customtkinter as ctk
+import requests
 from dotenv import load_dotenv, set_key
 
-from .. import __version__, collectors_live, env_check, report
+from .. import __version__, alerts, collectors_live, env_check, history, report, scheduler
 from ..engine import PLACEHOLDER_KEY, Reporter, TriageEngine, TriageOptions
 from ..enrich import pe_static, yara_scan
 from ..models import Cancelled, Finding, Status
@@ -38,7 +40,7 @@ from ..rules.attack import attack_url, technique_name
 from ..utils import expand_win_vars
 from ..virustotal import GUI_URL
 from ..whitelist import Whitelist, WhitelistError, add_to_whitelist, remove_from_whitelist
-from . import history, settings
+from . import settings
 from .dialogs import PRESETS, CompareDialog, NewScanDialog
 from .theme import (
     CONTROL_H,
@@ -107,6 +109,11 @@ PAGE_SUBTITLE = {
     "settings": "Claves, listas blancas, herramientas y apariencia",
 }
 APPEARANCE = {"Sistema": "system", "Claro": "light", "Oscuro": "dark"}
+SCHEDULES = {"Desactivado": "off", "Diario": "daily", "Semanal": "weekly"}
+INTEL_KEYS = (
+    ("AbuseIPDB", "ABUSEIPDB_API_KEY", "https://www.abuseipdb.com/account/api"),
+    ("MalwareBazaar", "MALWAREBAZAAR_API_KEY", "https://auth.abuse.ch/"),
+)
 
 
 def open_path(path: Path | str) -> None:
@@ -188,6 +195,8 @@ class TriageApp(ctk.CTk):
         self.var_vt_limit = ctk.StringVar(value=str(self.prefs.get("vt_limit") or ""))
         fmt = self.prefs.get("format")
         self.var_format = ctk.StringVar(value=fmt if fmt in FORMATS else "HTML")
+        self.var_notify = ctk.BooleanVar(value=bool(self.prefs.get("notify", True)))
+        self.var_alert_new = ctk.BooleanVar(value=bool(self.prefs.get("alert_new", True)))
 
         self.title(f"win11-triage {__version__}")
         self.geometry(self.prefs.get("geometry") or "1440x900")
@@ -733,6 +742,68 @@ class TriageApp(ctk.CTk):
             anchor="w", padx=SPACE["l"], pady=SPACE["l"]
         )
 
+        rep = section(3, 0, "Reputación (opcional)", "AbuseIPDB para IPs remotas y MalwareBazaar para hashes.")
+        for service, var, url in INTEL_KEYS:
+            secondary_button(
+                rep, f"Clave de {service}…", lambda s=service, v=var, u=url: self.edit_secret(s, v, u), icon="key"
+            ).pack(fill="x", padx=SPACE["l"], pady=(0, SPACE["s"]))
+        ctk.CTkFrame(rep, fg_color="transparent", height=SPACE["s"]).pack()
+
+        al = section(
+            3, 1, "Alertas e integraciones", "Notificación de Windows y webhook (Slack, Teams, Splunk HEC o JSON)."
+        )
+        ctk.CTkSwitch(
+            al,
+            text="Notificar al terminar si la ventana está en segundo plano",
+            variable=self.var_notify,
+            font=font("body"),
+            progress_color=T("accent"),
+        ).pack(anchor="w", padx=SPACE["l"], pady=(0, SPACE["s"]))
+        self.webhook_entry = ctk.CTkEntry(
+            al,
+            height=CONTROL_H,
+            corner_radius=RADIUS["control"],
+            fg_color=T("surface2"),
+            border_color=T("border"),
+            font=font("body"),
+            placeholder_text="https://hooks.slack.com/…  ·  https://…webhook.office.com/…",
+        )
+        self.webhook_entry.pack(fill="x", padx=SPACE["l"])
+        if os.environ.get("WIN11_TRIAGE_WEBHOOK"):
+            self.webhook_entry.insert(0, os.environ["WIN11_TRIAGE_WEBHOOK"])
+        row = ctk.CTkFrame(al, fg_color="transparent")
+        row.pack(fill="x", padx=SPACE["l"], pady=SPACE["s"])
+        secondary_button(row, "Guardar", self.save_webhook, width=100).pack(side="left")
+        ghost_button(row, "Enviar prueba", self.test_webhook, width=120).pack(side="left", padx=SPACE["s"])
+        ctk.CTkSwitch(
+            al,
+            text="Enviar solo lo nuevo o lo que empeora",
+            variable=self.var_alert_new,
+            font=font("body"),
+            progress_color=T("accent"),
+        ).pack(anchor="w", padx=SPACE["l"], pady=(0, SPACE["l"]))
+
+        sch = section(
+            4, 0, "Análisis programado", "Se ejecuta con el Programador de tareas y solo avisa si hay novedades."
+        )
+        self.schedule_seg = ctk.CTkSegmentedButton(sch, values=list(SCHEDULES), height=CONTROL_H, **segmented_style())
+        self.schedule_seg.set(self.prefs.get("schedule", "Desactivado"))
+        self.schedule_seg.pack(anchor="w", padx=SPACE["l"])
+        row = ctk.CTkFrame(sch, fg_color="transparent")
+        row.pack(fill="x", padx=SPACE["l"], pady=SPACE["s"])
+        ctk.CTkLabel(row, text="Hora", font=font("caption_bold")).pack(side="left")
+        self.schedule_at = ctk.CTkEntry(
+            row, width=80, height=CONTROL_H, corner_radius=RADIUS["control"], fg_color=T("surface2"),
+            border_color=T("border"), font=font("body"),
+        )  # fmt: skip
+        self.schedule_at.insert(0, self.prefs.get("schedule_at", "09:00"))
+        self.schedule_at.pack(side="left", padx=SPACE["s"])
+        apply_btn = secondary_button(row, "Aplicar", self.apply_schedule, width=100)
+        apply_btn.pack(side="left")
+        if not self.windows:
+            apply_btn.configure(state="disabled")
+        ctk.CTkFrame(sch, fg_color="transparent", height=SPACE["s"]).pack()
+
         ap = section(0, 1, "Apariencia", "Sigue el tema de Windows o fuerza claro u oscuro.")
         self.appearance = ctk.CTkSegmentedButton(
             ap,
@@ -1041,6 +1112,8 @@ class TriageApp(ctk.CTk):
             self.indeterminate(True)
         elif kind == "done":
             self.indeterminate(False)
+        elif kind == "toast":
+            toast(self, ev[1], ev[2])
         elif kind == "log":
             self.log_line(ev[1], ev[2])
             if ev[1] == "INFO":
@@ -1109,6 +1182,7 @@ class TriageApp(ctk.CTk):
         current_json = next((p for p in reports if p.suffix == ".json"), None)
         self.refresh_history()
         self.show_result(res, reports, current_json)
+        self.alert_after_scan(res)
 
         cnt = res.counts()
         took = f" en {res.duration:.0f} s" if res.duration is not None else ""
@@ -1830,6 +1904,92 @@ class TriageApp(ctk.CTk):
         toast(self, f"Exportado: {target.name}", "success", action=("Abrir", lambda: open_path(target)))
 
     # ================================================================= configuración
+    def edit_secret(self, service: str, var: str, url: str) -> None:
+        dlg = SecretDialog(self, os.environ.get(var, ""), service=service, url=url)
+        self.wait_window(dlg)
+        if dlg.value is None:
+            return
+        self.store_env(var, dlg.value)
+        toast(self, f"Clave de {service} guardada.", "success")
+
+    def store_env(self, var: str, value: str) -> None:
+        self.env_file.parent.mkdir(parents=True, exist_ok=True)
+        self.env_file.touch(exist_ok=True)
+        set_key(str(self.env_file), var, value, quote_mode="never")
+        os.environ[var] = value
+        self.log_line("INFO", f"{var} guardada en {self.env_file}")
+
+    def save_webhook(self) -> None:
+        url = self.webhook_entry.get().strip()
+        if url and not url.startswith("https://"):
+            messagebox.showerror("Webhook", "La URL del webhook debe empezar por https://", parent=self)
+            return
+        self.store_env("WIN11_TRIAGE_WEBHOOK", url)
+        toast(self, "Webhook guardado." if url else "Webhook desactivado.", "success")
+
+    def test_webhook(self) -> None:
+        url = self.webhook_entry.get().strip()
+        if not url:
+            toast(self, "Escribe primero la URL del webhook.", "warning")
+            return
+        res = self.result or TriageResult(
+            host=platform.node() or "host", user="", started=datetime.now(), dry_run=False, admin=False, tools={}
+        )
+
+        def work() -> None:
+            try:
+                kind = alerts.send_webhook(url, res, alerts.select_alertable(res)[:5])
+                self.events.put(("toast", f"Prueba enviada ({kind}).", "success"))
+            except requests.RequestException as e:
+                self.events.put(("toast", f"No se pudo enviar: {e}", "error"))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def apply_schedule(self) -> None:
+        choice = SCHEDULES[self.schedule_seg.get()]
+        at = self.schedule_at.get().strip() or "09:00"
+        try:
+            if choice == "off":
+                with contextlib.suppress(RuntimeError):
+                    scheduler.delete()
+                msg = "Análisis programado desactivado."
+            else:
+                scheduler.create(self.config_dir, choice, at, admin=self.admin)
+                msg = f"Análisis programado: {self.schedule_seg.get().lower()} a las {at}."
+        except (RuntimeError, OSError, ValueError) as e:
+            messagebox.showerror("Análisis programado", str(e), parent=self)
+            return
+        self.prefs["schedule"], self.prefs["schedule_at"] = self.schedule_seg.get(), at
+        settings.save(self.config_dir, self.prefs)
+        self.log_line("INFO", msg)
+        toast(self, msg, "success")
+
+    def alert_after_scan(self, res: TriageResult) -> None:
+        """Notificación y webhook al terminar (en segundo plano para no bloquear la ventana)."""
+        want_toast = self.var_notify.get() and self.focus_displayof() is None
+        webhook = "" if res.dry_run else os.environ.get("WIN11_TRIAGE_WEBHOOK", "").strip()
+        if not (want_toast or webhook):
+            return
+        previous = None
+        if self.var_alert_new.get() and self.previous is not None:
+            with contextlib.suppress(OSError, ValueError, KeyError):
+                previous = report.load_json(self.previous.path)
+        items = alerts.select_alertable(res, previous, only_new=previous is not None)
+        if previous is not None and not items:
+            return
+        title, body = alerts.summary_text(res, items, previous is not None)
+
+        def work() -> None:
+            if want_toast:
+                alerts.notify_toast(f"win11-triage · {title}", body)
+            if webhook:
+                try:
+                    alerts.send_webhook(webhook, res, items, previous is not None)
+                except requests.RequestException as e:
+                    self.events.put(("log", "AVISO", f"Webhook: {e}"))
+
+        threading.Thread(target=work, daemon=True).start()
+
     def edit_api_key(self) -> None:
         dlg = SecretDialog(self, os.environ.get("VT_API_KEY", ""))
         self.wait_window(dlg)
@@ -1877,6 +2037,8 @@ class TriageApp(ctk.CTk):
         self.prefs["event_days"] = int(self.var_days.get() or 7)
         self.prefs["vt_limit"] = self.var_vt_limit.get().strip()
         self.prefs["format"] = self.var_format.get()
+        self.prefs["notify"] = bool(self.var_notify.get())
+        self.prefs["alert_new"] = bool(self.var_alert_new.get())
         with contextlib.suppress(tk.TclError):
             self.prefs["geometry"] = self.geometry()
         settings.save(self.config_dir, self.prefs)

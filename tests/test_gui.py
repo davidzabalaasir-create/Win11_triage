@@ -39,10 +39,10 @@ def _run(app):
 
 def test_dry_run_populates_dashboard_table_and_history(app, tmp_path):
     _run(app)
-    assert app.cards["detected"].value.cget("text") == "15"
+    assert app.cards["detected"].value.cget("text") == "23"
     assert app.cards["new"].value.cget("text") == "—"  # primer análisis
     assert app.filter_btn.get() == "Detectados"
-    assert len(app.tree.get_children()) == 15
+    assert len(app.tree.get_children()) == 23
     assert len(app.priority_tree.get_children()) == 5
     assert len(app.conn_tree.get_children()) > 0
     assert app.gauge.score == 100
@@ -76,7 +76,7 @@ def test_export_csv_and_whitelist(app, tmp_path):
     _run(app)
     out = app.export_csv(tmp_path / "vista.csv")
     rows = list(csv.reader(out.open(encoding="utf-8-sig"), delimiter=";"))
-    assert rows[0][:3] == ["estado", "score", "origen"] and len(rows) == 16
+    assert rows[0][:3] == ["estado", "score", "origen"] and len(rows) == 24
 
     before = len(app.findings)
     app.tree.selection_set(app.tree.get_children()[0])
@@ -159,3 +159,29 @@ def test_review_workflow_compare_and_evidence(app, tmp_path):
     dialogs = [w for w in app.winfo_children() if w.__class__.__name__ == "CompareDialog"]
     assert dialogs and dialogs[0].diff.new == [] and dialogs[0].diff.resolved == []
     dialogs[0].destroy()
+
+
+def test_settings_integrations(app, tmp_path, monkeypatch):
+    app.show_page("settings")
+    app.update()
+    app.webhook_entry.delete(0, "end")
+    app.webhook_entry.insert(0, "http://inseguro")
+    monkeypatch.setattr("tkinter.messagebox.showerror", lambda *a, **k: None)
+    app.save_webhook()
+    assert (
+        "WIN11_TRIAGE_WEBHOOK" not in (tmp_path / ".env").read_text(encoding="utf-8")
+        if (tmp_path / ".env").exists()
+        else True
+    )
+    app.webhook_entry.delete(0, "end")
+    app.webhook_entry.insert(0, "https://hooks.slack.com/services/T/B/x")
+    app.save_webhook()
+    assert "hooks.slack.com" in (tmp_path / ".env").read_text(encoding="utf-8")
+    monkeypatch.delenv("WIN11_TRIAGE_WEBHOOK", raising=False)
+
+    sent = []
+    monkeypatch.setattr("win11_triage.alerts.notify_toast", lambda t, b: sent.append((t, b)) or True)
+    monkeypatch.setattr(app, "focus_displayof", lambda: None)  # ventana en segundo plano
+    _run(app)
+    _pump_until(app, lambda: bool(sent), timeout=5)
+    assert "win11-triage" in sent[0][0]

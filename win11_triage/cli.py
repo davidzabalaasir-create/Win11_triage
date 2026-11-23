@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
+import os
 import sys
 from pathlib import Path
 
+import requests
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.logging import RichHandler
@@ -103,6 +106,26 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="código de salida 2 si algún elemento tiene score ≥ N (además de las detecciones de VT)",
     )
+    al = p.add_argument_group("alertas e integraciones")
+    al.add_argument("--notify", action="store_true", help="notificación de Windows al terminar")
+    al.add_argument(
+        "--webhook",
+        metavar="URL",
+        default=None,
+        help="envía el resumen a Slack, Teams, Splunk HEC o JSON genérico (por defecto: WIN11_TRIAGE_WEBHOOK)",
+    )
+    al.add_argument("--jsonl", type=Path, metavar="FICHERO", help="añade los hallazgos en JSON Lines (Wazuh, Filebeat)")
+    al.add_argument(
+        "--alert-new",
+        action="store_true",
+        help="alerta solo de lo nuevo o lo que empeora respecto al análisis anterior",
+    )
+    al.add_argument(
+        "--schedule",
+        choices=("daily", "weekly", "off", "status"),
+        help="programa un análisis diario o semanal con alertas de novedades (off: lo quita)",
+    )
+    al.add_argument("--at", default="09:00", metavar="HH:MM", help="hora del análisis programado (por defecto 09:00)")
     opt.add_argument("--check-update", action="store_true", help="comprueba si hay una versión nueva y sale")
     opt.add_argument("--no-color", action="store_true", help="desactiva los colores")
     opt.add_argument(
@@ -292,10 +315,69 @@ def run(args: argparse.Namespace) -> int:
         zip_path = report.write_evidence_zip(res, args.output_dir / f"{res.file_stem}_evidencias.zip")
         console.print(f"[bold]Paquete de evidencias:[/] {zip_path}")
 
+    send_alerts(args, res)
+
     if opts.dry_run:
         return EXIT_OK  # el dry-run solo valida la estructura
     over = args.fail_on_score is not None and any(f.score >= args.fail_on_score for f in res.findings)
     return EXIT_DETECTED if (res.counts()[Status.DETECTED] or over) else EXIT_OK
+
+
+def send_alerts(args: argparse.Namespace, res: TriageResult) -> None:
+    """--notify, --webhook y --jsonl; con --alert-new solo lo nuevo o lo que empeora."""
+    webhook = args.webhook or os.environ.get("WIN11_TRIAGE_WEBHOOK", "").strip()
+    if not (args.notify or webhook or args.jsonl):
+        return
+    from . import alerts, history
+
+    previous = None
+    if args.alert_new:
+        current = args.output_dir / f"{res.file_stem}.json"
+        prev = history.previous_of(history.list_reports(args.output_dir), current, res.started, res.dry_run)
+        if prev is not None:
+            with contextlib.suppress(OSError, ValueError, KeyError):
+                previous = report.load_json(prev.path)
+        if previous is None:
+            console.print("[dim]--alert-new: no hay análisis anterior; se alerta de todo lo relevante.[/]")
+    items = alerts.select_alertable(res, previous, only_new=args.alert_new and previous is not None)
+    if args.jsonl:
+        n = alerts.write_jsonl(args.jsonl, res, items)
+        console.print(f"[bold]JSONL:[/] {n} evento(s) añadidos a {args.jsonl}")
+    if not items and args.alert_new:
+        console.print("[green]Sin novedades: no se envían alertas.[/]")
+        return
+    title, body = alerts.summary_text(res, items, args.alert_new)
+    if args.notify and not alerts.notify_toast(f"win11-triage · {title}", body):
+        console.print("[dim]Notificación de Windows no disponible en este sistema.[/]")
+    if webhook:
+        if res.dry_run:
+            console.print(f"[dim]Dry-run: no se envía el webhook ({alerts.webhook_kind(webhook)}).[/]")
+            return
+        try:
+            kind = alerts.send_webhook(webhook, res, items, args.alert_new)
+            console.print(f"[bold]Webhook:[/] enviado ({kind}, {len(items)} elemento(s)).")
+        except requests.RequestException as e:
+            console.print(f"[yellow]No se pudo enviar el webhook: {e}[/]")
+
+
+def schedule(args: argparse.Namespace) -> int:
+    from . import scheduler
+
+    try:
+        if args.schedule == "status":
+            console.print(scheduler.status())
+        elif args.schedule == "off":
+            scheduler.delete()
+            console.print("Análisis programado eliminado.")
+        else:
+            script = scheduler.create(args.config_dir, args.schedule, args.at, admin=env_check.is_admin())
+            when = "cada día" if args.schedule == "daily" else "cada lunes"
+            console.print(f"[green]Programado {when} a las {args.at}.[/] Script: {script}")
+            console.print("[dim]Solo avisará si hay hallazgos nuevos o que empeoran (--alert-new).[/]")
+    except (RuntimeError, OSError, ValueError) as e:
+        console.print(f"[red]No se pudo programar: {e}[/]")
+        return EXIT_ENV
+    return EXIT_OK
 
 
 def check_update() -> int:
@@ -324,6 +406,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.check_update:
         return check_update()
+    if args.schedule:
+        return schedule(args)
     if args.gui:
         from .gui import main as gui_main
 
