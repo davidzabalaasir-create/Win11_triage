@@ -2,6 +2,25 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y [SemVer](https://semver.org/lang/es/).
 
+## [3.0.0] — 2026-11-23
+
+### Añadido
+- **Árbol de procesos**: página «Procesos» con las ramas sospechosas desplegadas y cadenas padre → hijo en los informes.
+- **Reglas Sigma** (`--sigma`): motor propio compatible con el formato estándar sobre Sysmon (1, 3, 11, 12–14, 22), Security 4688, PowerShell 4104 y System 7045. 11 reglas incluidas y reglas propias en `sigma/*.yml`.
+- **Extensiones de navegador** (`--browsers`): Chrome, Edge, Brave y Firefox; fuera de la tienda, sin empaquetar, sin firma y permisos peligrosos.
+- **Reputación** (`--intel`): AbuseIPDB para IPs remotas y MalwareBazaar para hashes, con caché.
+- **Alertas**: notificación de Windows (`--notify`), webhooks para Slack, Teams, Splunk HEC o JSON genérico (`--webhook`), JSON Lines para Wazuh/Filebeat (`--jsonl`) y `--alert-new` para avisar solo de lo nuevo o lo que empeora. También en Ajustes.
+- **Análisis programado** (`--schedule daily|weekly`) con el Programador de tareas; en la GUI, en Ajustes.
+- **«¿Qué hago con esto?»**: pasos recomendados para cada hallazgo en la GUI, los informes y la CLI (`--explain`).
+- **Resumen ejecutivo en PDF** de una página (`--format pdf` y Exportar).
+- **Triaje remoto por WinRM** (`--remote`), sin instalar nada en el equipo analizado; también en «Nuevo análisis».
+- **Inglés**: interfaz, informes, PDF y recomendaciones (`--lang en` o Ajustes → Idioma).
+- **Paquete MSIX** para Microsoft Store (`scripts/build_msix.ps1`) y guía de publicación en `docs/MICROSOFT_STORE.md`.
+- **Página web** del proyecto en GitHub Pages (`site/`).
+
+### Corregido
+- Los avisos flotantes ocupaban 200 px de alto.
+
 ## [2.1.0] — 2026-11-23
 
 ### Añadido
