@@ -90,7 +90,14 @@ from .widgets import (
 log = logging.getLogger(__name__)
 
 FILTERS = {"Todos": None, "Detectados": Status.DETECTED, "Sospechosos": Status.UNKNOWN, "Limpios": Status.CLEAN}
-FORMATS = {"HTML": "html", "Markdown": "md", "JSON": "json", "Todos (HTML+MD+JSON)": "all", "No guardar": None}
+FORMATS = {
+    "HTML": "html",
+    "PDF ejecutivo": "pdf",
+    "Markdown": "md",
+    "JSON": "json",
+    "Todos (HTML+MD+JSON+PDF)": "all",
+    "No guardar": None,
+}
 SOURCE_LABEL = report.SOURCE_LABEL
 PAGES = (
     ("home", "Inicio", "home"),
@@ -1877,7 +1884,12 @@ class TriageApp(ctk.CTk):
         st = "normal" if self.result is not None else "disabled"
         menu.add_command(label="CSV de la vista actual…        Ctrl+E", command=self.export_csv, state=st)
         menu.add_separator()
-        for label, fmt in (("Informe HTML…", "html"), ("Informe Markdown…", "md"), ("JSON (esquema v2)…", "json")):
+        for label, fmt in (
+            ("Informe HTML…", "html"),
+            ("Resumen ejecutivo (PDF)…", "pdf"),
+            ("Informe Markdown…", "md"),
+            ("JSON (esquema v2)…", "json"),
+        ):
             menu.add_command(label=label, command=lambda f=fmt: self.export_report(f), state=st)
         menu.add_separator()
         menu.add_command(label="Paquete de evidencias (.zip)…", command=self.export_evidence, state=st)
@@ -1905,7 +1917,7 @@ class TriageApp(ctk.CTk):
     def export_report(self, fmt: str) -> None:
         if self.result is None:
             return
-        ext = {"html": ".html", "md": ".md", "json": ".json"}[fmt]
+        ext = {"html": ".html", "md": ".md", "json": ".json", "pdf": ".pdf"}[fmt]
         chosen = filedialog.asksaveasfilename(
             parent=self, defaultextension=ext, initialfile=f"{self.result.file_stem}{ext}"
         )

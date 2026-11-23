@@ -10,7 +10,7 @@ readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "David" }]
 requires-python = ">=3.10"
-dependencies = ["rich>=13.7", "requests>=2.31", "python-dotenv>=1.0", "customtkinter>=5.2", "pillow>=10", "psutil>=5.9", "pefile>=2023.2.7", "pyyaml>=6.0"]
+dependencies = ["rich>=13.7", "requests>=2.31", "python-dotenv>=1.0", "customtkinter>=5.2", "pillow>=10", "psutil>=5.9", "pefile>=2023.2.7", "pyyaml>=6.0", "reportlab>=4.0"]
 keywords = ["dfir", "blue-team", "windows", "sysinternals", "virustotal", "incident-response"]
 classifiers = [
     "Environment :: Console",

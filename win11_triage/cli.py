@@ -91,7 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--format",
         choices=report.FORMAT_CHOICES,
         default="md",
-        help="formato del informe: md, html, json, both (md+json) o all (por defecto: md)",
+        help="formato del informe: md, html, json, pdf (resumen ejecutivo), both (md+json) o all (todo; por defecto: md)",
     )
     opt.add_argument("--no-report", action="store_true", help="no exportar informe")
     opt.add_argument(

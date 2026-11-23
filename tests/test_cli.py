@@ -88,7 +88,7 @@ def test_html_report_and_json_roundtrip(tmp_path):
 
     cli.main(["--dry-run", "--config-dir", str(tmp_path), "--format", "all", "--no-color"])
     files = {p.suffix: p for p in (tmp_path / "reportes").iterdir()}
-    assert set(files) == {".md", ".html", ".json"}
+    assert set(files) == {".md", ".html", ".json", ".pdf"}
 
     html = files[".html"].read_text(encoding="utf-8")
     assert html.startswith("<!DOCTYPE html>") and "data:image/png;base64," in html

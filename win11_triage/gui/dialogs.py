@@ -39,7 +39,7 @@ PRESETS = {
     "Rápido": {"autoruns", "scan_user", "processes", "network"},
     "Completo": {key for _, items in GROUPS for key, _, _ in items},
 }
-FORMATS = ("HTML", "Markdown", "JSON", "Todos (HTML+MD+JSON)", "No guardar")
+FORMATS = ("HTML", "PDF ejecutivo", "Markdown", "JSON", "Todos (HTML+MD+JSON+PDF)", "No guardar")
 
 
 class NewScanDialog(Modal):

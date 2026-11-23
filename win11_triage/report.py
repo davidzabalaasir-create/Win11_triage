@@ -747,15 +747,20 @@ def render_html(r: TriageResult) -> str:
     return "".join(parts)
 
 
-FORMAT_CHOICES = ("md", "html", "json", "both", "all")
+FORMAT_CHOICES = ("md", "html", "json", "pdf", "both", "all")
 
 
 def write_reports(r: TriageResult, out_dir: Path, fmt: str) -> list[Path]:
-    """fmt: md | html | json | both (md+json) | all (md+html+json)."""
+    """fmt: md | html | json | pdf (resumen ejecutivo) | both (md+json) | all (md+html+json+pdf)."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    wanted = {"md": {"md"}, "html": {"html"}, "json": {"json"}, "both": {"md", "json"}, "all": {"md", "html", "json"}}[
-        fmt
-    ]
+    wanted = {
+        "md": {"md"},
+        "html": {"html"},
+        "json": {"json"},
+        "pdf": {"pdf"},
+        "both": {"md", "json"},
+        "all": {"md", "html", "json", "pdf"},
+    }[fmt]
     renderers = {
         "md": render_markdown,
         "html": render_html,
@@ -767,4 +772,8 @@ def write_reports(r: TriageResult, out_dir: Path, fmt: str) -> list[Path]:
             p = out_dir / f"{r.file_stem}.{ext}"
             p.write_text(renderers[ext](r), encoding="utf-8")
             written.append(p)
+    if "pdf" in wanted:
+        from .report_pdf import render_pdf  # reportlab solo se carga si hace falta
+
+        written.append(render_pdf(r, out_dir / f"{r.file_stem}_ejecutivo.pdf"))
     return written
