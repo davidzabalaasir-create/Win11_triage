@@ -213,6 +213,8 @@ class TriageEngine:
             res.modules.append("vt")
             self._vt(res)
         apply_vt(res.findings)
+        if self._procs is not None:
+            self._record_process_tree(res)
         res.finished = datetime.now()
         return res
 
@@ -253,6 +255,26 @@ class TriageEngine:
                 self._procs = collectors_live.snapshot_processes()
                 self._conns = collectors_live.snapshot_connections(self._procs)
         return self._procs, self._conns or []
+
+    def _record_process_tree(self, res: TriageResult) -> None:
+        """Guarda el árbol de procesos con los señalados marcados (para la vista de árbol y los informes)."""
+        scores: dict[int, int] = {}
+        for f in res.findings:
+            if f.pid is not None:
+                scores[f.pid] = max(scores.get(f.pid, 0), f.score)
+        res.processes = [
+            {
+                "pid": p.pid,
+                "ppid": p.ppid,
+                "name": p.name,
+                "exe": p.exe,
+                "cmdline": p.cmdline[:500],
+                "created": p.created,
+                "flagged": p.pid in scores,
+                "score": scores.get(p.pid, 0),
+            }
+            for p in (self._procs or {}).values()
+        ]
 
     def _processes(self, res: TriageResult) -> list[Finding]:
         if not collectors_live.available():

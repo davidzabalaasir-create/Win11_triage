@@ -34,6 +34,7 @@ class TriageResult:
     errors: list[str] = field(default_factory=list)
     finished: datetime | None = None
     reviews: dict[str, dict[str, Any]] = field(default_factory=dict)  # Finding.key → {state, note}
+    processes: list[dict[str, Any]] = field(default_factory=list)  # snapshot: pid, ppid, name, exe, cmdline, flagged
 
     def review_of(self, f: Finding) -> dict[str, Any] | None:
         rv = self.reviews.get(f.key)
@@ -92,6 +93,22 @@ def timeline(findings: list[Finding], limit: int = 40) -> list[Finding]:
     """Elementos con fecha (creación del fichero, arranque del proceso o fecha del evento), del más reciente al más antiguo."""
     dated = [f for f in findings if f.created]
     return sorted(dated, key=lambda f: f.created, reverse=True)[:limit]
+
+
+def process_chains(r: TriageResult) -> list[list[dict[str, Any]]]:
+    """Para cada proceso señalado, su cadena de antecesores: [raíz, …, padre, proceso]."""
+    by_pid = {p["pid"]: p for p in r.processes}
+    chains = []
+    for p in r.processes:
+        if not p.get("flagged"):
+            continue
+        chain, seen, cur = [p], {p["pid"]}, p
+        while cur.get("ppid") in by_pid and cur["ppid"] not in seen:
+            cur = by_pid[cur["ppid"]]
+            seen.add(cur["pid"])
+            chain.append(cur)
+        chains.append(list(reversed(chain)))
+    return sorted(chains, key=lambda ch: -ch[-1].get("score", 0))
 
 
 @dataclass
@@ -389,6 +406,23 @@ def render_markdown(r: TriageResult) -> str:
             L.append("")
         L += ["</details>", ""]
 
+    chains = process_chains(r)
+    if chains:
+        L += ["## Cadenas de procesos sospechosos", ""]
+        for ch in chains[:15]:
+            L.append(
+                "- "
+                + " → ".join(
+                    (
+                        f"**{_md(p['name'])}** ({p['pid']}, score {p.get('score', 0)})"
+                        if p.get("flagged")
+                        else f"{_md(p['name'])} ({p['pid']})"
+                    )
+                    for p in ch
+                )
+            )
+        L.append("")
+
     events = timeline(r.findings)
     if events:
         L += ["## Cronología", "", "| Fecha | Estado | Origen | Nombre |", "|---|---|---|---|"]
@@ -436,6 +470,7 @@ def to_json(r: TriageResult) -> dict[str, Any]:
         "errors": r.errors,
         "sections": {title: [f.to_dict() for f in sort_findings(fs)] for title, fs in r.sections.items()},
         "findings": [_with_review(r, f) for f in sort_findings(r.findings)],
+        "process_tree": r.processes,
     }
 
 
@@ -474,6 +509,7 @@ def load_json(path: Path) -> TriageResult:
         vt_stats=data.get("vt_stats"),
         errors=list(data.get("errors") or []),
         finished=datetime.fromisoformat(finished) if finished else None,
+        processes=list(data.get("process_tree") or []),
     )
     sections = data.get("sections")
     if sections is None:  # informes de la v1.1: solo lista plana
@@ -634,6 +670,24 @@ def render_html(r: TriageResult) -> str:
                 f"<details><summary><span class='badge' style='--c:{_HTML_COLOR[f.status]}'>{f.status.value}</span> "
                 f"{_e(f.name)} <span class='muted'>· score {f.score}</span></summary><dl>{dl}</dl>{sig_table}</details>"
             )
+
+    chains = process_chains(r)
+    if chains:
+        items = "".join(
+            "<li>"
+            + " → ".join(
+                (
+                    f"<b style='color:{_HTML_COLOR[Status.DETECTED] if p.get('score', 0) >= 70 else _HTML_COLOR[Status.UNKNOWN]}'>"
+                    f"{_e(p['name'])}</b> <span class='muted'>({p['pid']})</span>"
+                )
+                if p.get("flagged")
+                else f"{_e(p['name'])} <span class='muted'>({p['pid']})</span>"
+                for p in ch
+            )
+            + "</li>"
+            for ch in chains[:15]
+        )
+        parts.append(f"<h2>Cadenas de procesos sospechosos</h2><ul class='chains'>{items}</ul>")
 
     events = timeline(r.findings)
     if events:

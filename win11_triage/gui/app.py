@@ -94,6 +94,7 @@ PAGES = (
     ("home", "Inicio", "home"),
     ("findings", "Hallazgos", "findings"),
     ("network", "Red", "network"),
+    ("processes", "Procesos", "tree"),
     ("history", "Historial", "history"),
     ("settings", "Ajustes", "settings"),
 )
@@ -101,6 +102,7 @@ PAGE_SUBTITLE = {
     "home": "Resumen del último análisis",
     "findings": "Todo lo encontrado, con el porqué de cada elemento",
     "network": "Conexiones externas de los procesos señalados",
+    "processes": "Árbol padre → hijo; las ramas con procesos señalados aparecen desplegadas",
     "history": "Análisis anteriores guardados en la carpeta de informes",
     "settings": "Claves, listas blancas, herramientas y apariencia",
 }
@@ -318,6 +320,7 @@ class TriageApp(ctk.CTk):
             ("home", self._page_home),
             ("findings", self._page_findings),
             ("network", self._page_network),
+            ("processes", self._page_processes),
             ("history", self._page_history),
             ("settings", self._page_settings),
         ):
@@ -573,6 +576,117 @@ class TriageApp(ctk.CTk):
             ),
         )
         self.conn_tree.bind("<Button-3>", self.popup_connection_menu)
+
+    def _page_processes(self, page: ctk.CTkFrame) -> None:
+        bar = ctk.CTkFrame(page, fg_color="transparent")
+        bar.pack(fill="x", pady=(0, SPACE["m"]))
+        self.only_flagged_tree = ctk.BooleanVar(value=True)
+        ctk.CTkSwitch(
+            bar,
+            text="Solo ramas con procesos señalados",
+            variable=self.only_flagged_tree,
+            command=self.render_process_tree,
+            font=font("body"),
+            progress_color=T("accent"),
+        ).pack(side="left")
+        self.proc_info = ctk.CTkLabel(bar, text="", font=font("caption"), text_color=T("text2"))
+        self.proc_info.pack(side="right")
+        frame = ctk.CTkFrame(
+            page, fg_color=T("surface"), corner_radius=RADIUS["card"], border_width=1, border_color=T("border")
+        )
+        frame.pack(fill="both", expand=True)
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(0, weight=1)
+        self.proc_tree = ttk.Treeview(
+            frame, columns=("pid", "score", "ruta", "cmd"), show="tree headings", style="Triage.Treeview"
+        )
+        self.proc_tree.heading("#0", text="Proceso", anchor="w")
+        self.proc_tree.column("#0", width=280, minwidth=200, stretch=False)
+        for key, title, width, stretch, anchor in (
+            ("pid", "PID", 70, False, "e"),
+            ("score", "Score", 60, False, "e"),
+            ("ruta", "Ruta", 300, True, "w"),
+            ("cmd", "Línea de comandos", 360, True, "w"),
+        ):
+            self.proc_tree.heading(key, text=title, anchor=anchor)
+            self.proc_tree.column(key, width=width, minwidth=40, stretch=stretch, anchor=anchor)
+        ys = ctk.CTkScrollbar(frame, command=self.proc_tree.yview, button_color=T("border"))
+        self.proc_tree.configure(yscrollcommand=ys.set)
+        self.proc_tree.grid(row=0, column=0, sticky="nsew", padx=(SPACE["xs"], 0), pady=SPACE["xs"])
+        ys.grid(row=0, column=1, sticky="ns", pady=SPACE["s"])
+        self.proc_tree.bind("<Double-1>", lambda _e: self.jump_to_process())
+        self.proc_empty = ctk.CTkLabel(frame, text="", font=font("body"), text_color=T("text2"), fg_color=T("surface"))
+
+    def render_process_tree(self) -> None:
+        tree = self.proc_tree
+        tree.delete(*tree.get_children())
+        procs = self.result.processes if self.result else []
+        if not procs:
+            self.proc_info.configure(text="")
+            self.proc_empty.configure(text="Activa «Procesos en ejecución» en el análisis para ver el árbol.")
+            self.proc_empty.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        self.proc_empty.place_forget()
+        by_pid = {p["pid"]: p for p in procs}
+        children: dict[int, list[dict]] = {}
+        for p in procs:
+            children.setdefault(p["ppid"] if p["ppid"] in by_pid and p["ppid"] != p["pid"] else -1, []).append(p)
+        keep: set[int] = set()
+        for p in procs:  # el proceso señalado y todos sus antecesores
+            if p.get("flagged"):
+                cur, seen = p, set()
+                while cur and cur["pid"] not in seen:
+                    seen.add(cur["pid"])
+                    keep.add(cur["pid"])
+                    cur = by_pid.get(cur["ppid"])
+        only = self.only_flagged_tree.get()
+
+        def add(parent_iid: str, p: dict) -> None:
+            if only and p["pid"] not in keep:
+                return
+            flagged = p.get("flagged")
+            st = Status.DETECTED if p.get("score", 0) >= 70 else (Status.UNKNOWN if flagged else None)
+            iid = f"p{p['pid']}"
+            tree.insert(
+                parent_iid,
+                "end",
+                iid=iid,
+                text=f"  {p['name']}",
+                image=self.dots[st] if st else "",
+                values=(
+                    p["pid"],
+                    p.get("score") or "",
+                    elide_middle(p.get("exe") or "—", 60),
+                    p.get("cmdline", "")[:200],
+                ),
+                open=p["pid"] in keep,
+            )
+            for ch in sorted(children.get(p["pid"], []), key=lambda x: x["name"]):
+                add(iid, ch)
+
+        for root in sorted(children.get(-1, []), key=lambda x: x["name"]):
+            add("", root)
+        flagged_n = sum(1 for p in procs if p.get("flagged"))
+        self.proc_info.configure(
+            text=f"{len(procs)} procesos · {flagged_n} señalados · doble clic para ver el hallazgo"
+        )
+
+    def jump_to_process(self) -> None:
+        sel = self.proc_tree.selection()
+        if not sel:
+            return
+        pid = int(sel[0][1:])
+        for i, f in enumerate(self.findings):
+            if f.pid == pid:
+                self.filter_btn.set("Todos")
+                self.search.delete(0, "end")
+                self.render_table()
+                self.show_page("findings")
+                if self.tree.exists(str(i)):
+                    self.tree.selection_set(str(i))
+                    self.tree.see(str(i))
+                return
+        toast(self, "Este proceso no tiene hallazgos: solo forma parte de la cadena.")
 
     def _page_history(self, page: ctk.CTkFrame) -> None:
         bar = ctk.CTkFrame(page, fg_color="transparent")
@@ -1028,6 +1142,7 @@ class TriageApp(ctk.CTk):
         self.render_dashboard()
         self.render_table()
         self.render_connections()
+        self.render_process_tree()
         self.update_subtitle()
         self.open_report_btn.configure(state="normal" if self.reports else "disabled")
         if self.result is None:
