@@ -126,6 +126,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="programa un análisis diario o semanal con alertas de novedades (off: lo quita)",
     )
     al.add_argument("--at", default="09:00", metavar="HH:MM", help="hora del análisis programado (por defecto 09:00)")
+    opt.add_argument(
+        "--explain", action="store_true", help="«¿Qué hago con esto?»: pasos recomendados para los 5 más graves"
+    )
     opt.add_argument("--check-update", action="store_true", help="comprueba si hay una versión nueva y sale")
     opt.add_argument("--no-color", action="store_true", help="desactiva los colores")
     opt.add_argument(
@@ -315,12 +318,31 @@ def run(args: argparse.Namespace) -> int:
         zip_path = report.write_evidence_zip(res, args.output_dir / f"{res.file_stem}_evidencias.zip")
         console.print(f"[bold]Paquete de evidencias:[/] {zip_path}")
 
+    if args.explain:
+        print_explain(res)
     send_alerts(args, res)
 
     if opts.dry_run:
         return EXIT_OK  # el dry-run solo valida la estructura
     over = args.fail_on_score is not None and any(f.score >= args.fail_on_score for f in res.findings)
     return EXIT_DETECTED if (res.counts()[Status.DETECTED] or over) else EXIT_OK
+
+
+def print_explain(res: TriageResult) -> None:
+    from . import playbook
+
+    top = [f for f in report.sort_findings(res.findings) if f.status != Status.CLEAN][:5]
+    for f in top:
+        adv = playbook.advice_for(f)
+        steps = "\n".join(f"  {i}. {s}" for i, s in enumerate(adv.steps, 1))
+        console.print(
+            Panel(
+                f"[bold]{adv.summary}[/]\n{steps}",
+                title=f"¿Qué hago con esto? · {f.name} (score {f.score})",
+                title_align="left",
+                border_style="red" if f.status == Status.DETECTED else "yellow",
+            )
+        )
 
 
 def send_alerts(args: argparse.Namespace, res: TriageResult) -> None:

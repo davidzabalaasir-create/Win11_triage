@@ -12,7 +12,7 @@ from typing import Any
 
 from rich.table import Table
 
-from . import __copyright__, __version__
+from . import __copyright__, __version__, playbook
 from .env_check import ToolStatus
 from .models import Connection, Finding, Signal, Status
 from .rules.attack import attack_url, technique_name
@@ -411,6 +411,10 @@ def render_markdown(r: TriageResult) -> str:
             if rv:
                 note = f" — {_md(rv['note'])}" if rv.get("note") else ""
                 L.append(f"- **Revisión del analista:** {_md(rv.get('state', 'Pendiente'))}{note}")
+            if f.status != Status.CLEAN:
+                adv = playbook.advice_for(f)
+                L += ["", f"**¿Qué hago con esto?** {_md(adv.summary)}", ""]
+                L += [f"{i}. {_md(s)}" for i, s in enumerate(adv.steps, 1)]
             if f.unique_signals:
                 L += ["", "| Señal | Peso | ATT&CK | Evidencia |", "|---|---|---|---|"]
                 L += [
@@ -551,7 +555,7 @@ header img{width:56px;height:56px}h1{margin:0;font-size:26px}h2{margin:36px 0 12
 th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top}th{background:var(--panel);color:var(--muted);font-weight:600}
 td code{font:12px Consolas,monospace;color:#cbd5e1;word-break:break-all}.badge{display:inline-block;padding:2px 10px;border-radius:999px;font-weight:600;font-size:12px;color:#0f172a;background:var(--c)}
 details{background:var(--card);border:1px solid var(--border);border-radius:10px;margin:8px 0;padding:10px 14px}summary{cursor:pointer;font-weight:600}
-dl{display:grid;grid-template-columns:140px 1fr;gap:4px 12px;margin:10px 0 0}dt{color:var(--muted)}dd{margin:0;word-break:break-all}
+.todo{background:rgba(59,130,246,.10);border-left:3px solid #3B82F6;border-radius:6px;padding:10px 14px;margin:10px 0}.todo ol{margin:6px 0 0 18px;padding:0}dl{display:grid;grid-template-columns:140px 1fr;gap:4px 12px;margin:10px 0 0}dt{color:var(--muted)}dd{margin:0;word-break:break-all}
 a{color:#38bdf8}footer{margin-top:40px;color:var(--muted);font-size:12px}
 @media print{body{background:#fff;color:#111}.card,table,details{background:#fff}th{background:#eee}}
 """
@@ -682,9 +686,15 @@ def render_html(r: TriageResult) -> str:
                 if sig_rows
                 else ""
             )
+            todo = ""
+            if f.status != Status.CLEAN:
+                adv = playbook.advice_for(f)
+                steps = "".join(f"<li>{_e(s)}</li>" for s in adv.steps)
+                todo = f"<div class='todo'><b>¿Qué hago con esto?</b> {_e(adv.summary)}<ol>{steps}</ol></div>"
             parts.append(
                 f"<details><summary><span class='badge' style='--c:{_HTML_COLOR[f.status]}'>{f.status.value}</span> "
-                f"{_e(f.name)} <span class='muted'>· score {f.score}</span></summary><dl>{dl}</dl>{sig_table}</details>"
+                f"{_e(f.name)} <span class='muted'>· score {f.score}</span></summary>{todo}<dl>{dl}</dl>{sig_table}"
+                "</details>"
             )
 
     chains = process_chains(r)

@@ -30,7 +30,7 @@ import customtkinter as ctk
 import requests
 from dotenv import load_dotenv, set_key
 
-from .. import __version__, alerts, collectors_live, env_check, history, report, scheduler
+from .. import __version__, alerts, collectors_live, env_check, history, playbook, report, scheduler
 from ..engine import PLACEHOLDER_KEY, Reporter, TriageEngine, TriageOptions
 from ..enrich import pe_static, yara_scan
 from ..models import Cancelled, Finding, Status
@@ -1512,6 +1512,21 @@ class TriageApp(ctk.CTk):
         self.save_note_btn = ghost_button(box, "Guardar nota", self.save_note, width=120)
         self.save_note_btn.pack(anchor="e")
         self._detail_lines.append(f"Revisión: {rv['state']} {rv.get('note', '')}")
+
+        if f.status != Status.CLEAN:
+            adv = playbook.advice_for(f)
+            box = self._section("¿Qué hago con esto?")
+            panel = ctk.CTkFrame(box, fg_color=T("accent_soft"), corner_radius=RADIUS["control"])
+            panel.pack(fill="x", pady=(0, SPACE["xs"]))
+            ctk.CTkLabel(
+                panel, text=adv.summary, font=font("body_bold"), wraplength=300, justify="left", anchor="w"
+            ).pack(anchor="w", fill="x", padx=SPACE["m"], pady=(SPACE["m"], SPACE["xs"]))
+            for i, step in enumerate(adv.steps, 1):
+                ctk.CTkLabel(
+                    panel, text=f"{i}. {step}", font=font("body"), wraplength=300, justify="left", anchor="w"
+                ).pack(anchor="w", fill="x", padx=SPACE["m"], pady=(0, SPACE["xs"]))
+            ctk.CTkFrame(panel, fg_color="transparent", height=SPACE["xs"]).pack()
+            self._detail_lines.append(playbook.as_text(f))
 
         if f.unique_signals:
             box = self._section("Por qué")
