@@ -1177,6 +1177,7 @@ class TriageApp(ctk.CTk):
             static=m["static"],
             vt=m["vt"],
             intel=m.get("intel", False),
+            quick={k for k, on in m.items() if on} == PRESETS["Rápido"],  # perfil Rápido: autorunsc reducido
             dry_run=self.var_dry.get(),
             vt_limit=int(raw) if raw else None,
             event_days=int(self.var_days.get() or 7),

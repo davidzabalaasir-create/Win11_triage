@@ -12,6 +12,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y 
 - **Análisis de contenido (PE/YARA) en paralelo**.
 - **Reputación (AbuseIPDB/MalwareBazaar)**: varias consultas a la vez; la primera de cada servicio va sola para no insistir si la clave es mala.
 - **Historial en caché**: refrescar la lista con 150 informes pasa de ≈140 ms a ≈1 ms.
+- **VirusTotal más rápido**: lo firmado por un editor de confianza y sin ninguna señal ya no gasta consulta (15 s cada una en el plan gratuito), y se consulta primero lo de mayor puntuación, así `--vt-limit` aprovecha mejor las consultas. `--vt-all` vuelve a consultarlo todo.
+- **sigcheck** analiza Temp y AppData a la vez.
+- **Modo rápido** (`--quick` o perfil «Rápido» en la app): autorunsc sin códecs, gadgets, complementos de IE ni Known DLLs.
 
 ## [3.0.0] — 2026-11-23
 

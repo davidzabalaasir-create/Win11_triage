@@ -93,6 +93,8 @@ class TriageOptions:
     network: bool = False
     static: bool = False
     vt: bool = False
+    vt_all: bool = False  # consultar también lo firmado y sin señales
+    quick: bool = False  # autorunsc solo con las categorías de persistencia más usadas
     intel: bool = False
     dry_run: bool = False
     vt_limit: int | None = None
@@ -175,6 +177,11 @@ class _ParallelReporter(Reporter):
     def error(self, text: str) -> None:
         with self.lock:
             self.inner.error(text)
+
+
+def vt_worthy(f: Finding) -> bool:
+    """¿Merece gastar una consulta de VirusTotal? No, si tiene firma válida y nada sospechoso."""
+    return not (f.signed_ok and f.score < 30)
 
 
 # ----------------------------------------------------------------- dry-run
@@ -364,22 +371,24 @@ class TriageEngine:
             raw = sample_text("autorunsc_sample.csv").encode("utf-16")  # mismo decodificador que el real
             return collectors.parse_autoruns(collectors.decode_output(raw))
         self.r.stage("Ejecutando autorunsc (puede tardar varios minutos)…")
-        return collectors.collect_autoruns(self.tools["autorunsc.exe"].path)  # type: ignore[arg-type]
+        return collectors.collect_autoruns(self.tools["autorunsc.exe"].path, quick=self.opts.quick)  # type: ignore[arg-type]
 
     def _sigcheck(self, res: TriageResult) -> list[Finding]:
         if self.opts.dry_run:
             return collectors.parse_sigcheck(sample_text("sigcheck_sample.csv"), "(muestra)")
-        found: list[Finding] = []
-        for folder in collectors.user_scan_targets():
+        folders = [f for f in collectors.user_scan_targets() if f.is_dir()]
+        self.r.stage(f"Ejecutando sigcheck sobre {len(folders)} carpeta(s) a la vez…")
+
+        def one(folder: Path) -> list[Finding]:
             self._check_cancel()
-            if not folder.is_dir():
-                continue
-            self.r.stage(f"Ejecutando sigcheck sobre {folder}…")
             try:
-                found += collectors.collect_sigcheck(self.tools["sigcheck.exe"].path, folder)  # type: ignore[arg-type]
+                return collectors.collect_sigcheck(self.tools["sigcheck.exe"].path, folder)  # type: ignore[arg-type]
             except collectors.CollectorError as e:
                 self._fail(res, str(e))
-        return found
+                return []
+
+        with ThreadPoolExecutor(max_workers=max(1, len(folders)), thread_name_prefix="sigcheck") as pool:
+            return [f for part in pool.map(one, folders) for f in part]
 
     def _snapshot(self) -> tuple[dict[int, collectors_live.ProcInfo], list]:
         """Procesos y conexiones (una sola captura compartida por --processes y --network)."""
@@ -593,8 +602,19 @@ class TriageEngine:
             on_notice=self.r.warn,
             cancel=self.cancel,
         )
-        hashes = sorted({f.sha256 for f in res.findings if f.sha256})
+        # Cada consulta nueva cuesta 15 s (plan gratuito): primero lo más grave, y lo firmado por un
+        # editor de confianza sin ninguna señal de riesgo no se consulta (salvo --vt-all).
+        best: dict[str, int] = {}
+        for f in res.findings:
+            if f.sha256 and (self.opts.vt_all or vt_worthy(f)):
+                best[f.sha256] = max(best.get(f.sha256, -1), f.score)
+        trusted = len({f.sha256 for f in res.findings if f.sha256} - set(best))
+        hashes = sorted(best, key=lambda h: (-best[h], h))
         pending = {h for h in hashes if not client.cached(h)}
+        if trusted:
+            self.r.info(
+                f"VirusTotal: {trusted} hash(es) firmados por editores de confianza sin señales no se consultan."
+            )
         limit = len(pending) if self.opts.vt_limit is None else min(self.opts.vt_limit, len(pending))
         self.r.vt_start(len(hashes), len(hashes) - len(pending), limit, max(0, limit - 1) * client.interval)
 
@@ -618,4 +638,4 @@ class TriageEngine:
             client.save()
             for f in res.findings:
                 f.vt = results.get(f.sha256, f.vt)
-            res.vt_stats = client.stats
+            res.vt_stats = {**client.stats, "trusted": trusted}

@@ -19,6 +19,9 @@ log = logging.getLogger(__name__)
 
 # -nobanner: salida CSV pura. -s en sigcheck: recorre subcarpetas.
 AUTORUNS_ARGS = ["-accepteula", "-nobanner", "-a", "*", "-c", "-h", "-s"]
+# Modo rápido: sin códecs (c), gadgets (g), complementos de IE (i) ni Known DLLs (k), que son cientos
+# de entradas de Microsoft cuya firma hay que verificar y casi nunca aportan hallazgos.
+AUTORUNS_QUICK_CATEGORIES = "bdehlmnoprstw"
 SIGCHECK_ARGS = ["-accepteula", "-nobanner", "-u", "-e", "-c", "-h", "-s"]
 TCPVCON_ARGS = ["-accepteula", "-nobanner", "-c", "-n"]
 
@@ -136,8 +139,12 @@ def parse_autoruns(text: str) -> list[Finding]:
     return findings
 
 
-def collect_autoruns(exe: Path) -> list[Finding]:
-    findings = parse_autoruns(run_tool(exe, AUTORUNS_ARGS))
+def autoruns_args(quick: bool = False) -> list[str]:
+    return [a if not (quick and a == "*") else AUTORUNS_QUICK_CATEGORIES for a in AUTORUNS_ARGS]
+
+
+def collect_autoruns(exe: Path, quick: bool = False) -> list[Finding]:
+    findings = parse_autoruns(run_tool(exe, autoruns_args(quick)))
     _fill_missing_hashes(findings)
     return findings
 

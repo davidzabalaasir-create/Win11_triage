@@ -646,6 +646,8 @@ EN: dict[str, str] = {
 PATTERNS = compile_patterns(
     [
         (r"Creado hace menos de (\d+) días", "Created less than {0} days ago"),
+        (r"(\d+) consultas nuevas · (\d+) desde caché · (\d+) errores · (\d+) omitidas · (\d+) de confianza sin consultar",
+         "{0} new lookups · {1} from cache · {2} errors · {3} skipped · {4} trusted not looked up"),
         (r"(\d+) consultas nuevas · (\d+) desde caché · (\d+) errores · (\d+) omitidas",
          "{0} new lookups · {1} from cache · {2} errors · {3} skipped"),
         (r"(\d+) IP \((\d+) maliciosas\) · (\d+) hashes \((\d+) en MalwareBazaar\)",

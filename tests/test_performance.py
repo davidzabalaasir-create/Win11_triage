@@ -88,3 +88,25 @@ def test_wevtutil_queries_in_parallel(monkeypatch):
     findings, warnings = ce.collect_events(7)
     assert time.monotonic() - t0 < 0.5 and len(calls) == len(ce.LOGS)
     assert findings == [] and len(warnings) == 1 and "Defender" in warnings[0]
+
+
+def test_vt_priority_and_trusted_skip(tmp_path):
+    from win11_triage.engine import vt_worthy
+    from win11_triage.models import Signal
+
+    signed = Finding("autoruns", "ok", r"C:\ok.exe", "MS", "(Verified) Microsoft", "a" * 64, signed_ok=True)
+    assert not vt_worthy(signed)
+    signed.add(Signal("X", "x", 40))
+    assert vt_worthy(signed)  # firmado pero con señales: sí se consulta
+    assert vt_worthy(Finding("autoruns", "x", r"C:\x.exe", "", "", "b" * 64))
+    res = TriageEngine(TriageOptions(dry_run=True, autoruns=True, vt=True, vt_all=True, config_dir=tmp_path), {}).run()
+    assert res.vt_stats["trusted"] == 0  # --vt-all consulta todo
+
+
+def test_quick_autoruns_args():
+    from win11_triage import collectors
+
+    full, quick = collectors.autoruns_args(), collectors.autoruns_args(quick=True)
+    assert full[full.index("-a") + 1] == "*"
+    cats = quick[quick.index("-a") + 1]
+    assert "l" in cats and "s" in cats and "t" in cats and "c" not in cats and "k" not in cats
