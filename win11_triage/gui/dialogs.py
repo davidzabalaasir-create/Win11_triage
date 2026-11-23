@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING
 
 import customtkinter as ctk
 
-from .theme import CONTROL_H, RADIUS, SPACE, T, font
-from .widgets import Modal, Tooltip, option_style, primary_button, secondary_button, segmented_style
+from ..report import TriageResult, diff_results
+from .theme import CONTROL_H, RADIUS, SPACE, STATUS_LABEL, STATUS_TOKEN, T, elide_middle, font, mono
+from .widgets import Badge, Modal, Tooltip, option_style, primary_button, secondary_button, segmented_style
 
 if TYPE_CHECKING:
     from .app import TriageApp
@@ -154,3 +155,52 @@ class NewScanDialog(Modal):
     def _start(self) -> None:
         self.destroy()
         self.app.start()
+
+
+class CompareDialog(Modal):
+    """Diferencias entre dos análisis: nuevos, resueltos, empeoran y mejoran."""
+
+    def __init__(self, app: TriageApp, previous: TriageResult, current: TriageResult, title: str) -> None:
+        super().__init__(app, "Comparar análisis", "860x640")
+        diff = diff_results(previous, current)
+        self.diff = diff
+        body = ctk.CTkFrame(self, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=SPACE["xl"], pady=(SPACE["xl"], 0))
+        ctk.CTkLabel(body, text="Comparar análisis", font=font("title")).pack(anchor="w")
+        ctk.CTkLabel(body, text=title, font=font("caption"), text_color=T("text2")).pack(
+            anchor="w", pady=(SPACE["xs"], SPACE["l"])
+        )
+        tabs = ctk.CTkTabview(body, fg_color=T("surface"), segmented_button_selected_color=T("accent"),
+                              segmented_button_selected_hover_color=T("accent_hover"),
+                              segmented_button_unselected_color=T("surface2"), segmented_button_fg_color=T("surface2"),
+                              text_color=T("text"))  # fmt: skip
+        tabs.pack(fill="both", expand=True)
+        groups = (
+            (f"Nuevos ({len(diff.new)})", [(f, None) for f in diff.new], "No hay elementos nuevos."),
+            (f"Resueltos ({len(diff.resolved)})", [(f, None) for f in diff.resolved], "Nada ha desaparecido."),
+            (f"Empeoran ({len(diff.worse)})", diff.worse, "Ninguna puntuación ha subido 10 puntos o más."),
+            (f"Mejoran ({len(diff.better)})", diff.better, "Ninguna puntuación ha bajado 10 puntos o más."),
+        )
+        for name, items, empty in groups:
+            tab = tabs.add(name)
+            lst = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+            lst.pack(fill="both", expand=True)
+            if not items:
+                ctk.CTkLabel(lst, text=empty, font=font("body"), text_color=T("text2")).pack(
+                    anchor="w", pady=SPACE["l"]
+                )
+            for f, before in items:
+                row = ctk.CTkFrame(lst, fg_color="transparent")
+                row.pack(fill="x", pady=2)
+                Badge(row, STATUS_LABEL[f.status], STATUS_TOKEN[f.status]).pack(side="left")
+                score = f"{before} → {f.score}" if before is not None else str(f.score)
+                ctk.CTkLabel(row, text=score, font=font("body_bold"), width=90, anchor="e").pack(
+                    side="left", padx=SPACE["s"]
+                )
+                ctk.CTkLabel(row, text=f.name, font=font("body"), anchor="w").pack(side="left", padx=SPACE["s"])
+                ctk.CTkLabel(row, text=elide_middle(f.path, 60), font=mono(11), text_color=T("text2"), anchor="w").pack(
+                    side="left", padx=SPACE["s"]
+                )
+        actions = ctk.CTkFrame(self, fg_color="transparent")
+        actions.pack(fill="x", padx=SPACE["xl"], pady=SPACE["l"])
+        primary_button(actions, "Cerrar", self.destroy, width=120).pack(side="right")

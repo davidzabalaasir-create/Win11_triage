@@ -107,6 +107,12 @@ class Finding:
         return sorted({t.strip() for s in self.unique_signals for t in s.attack.split(",") if t.strip()})
 
     @property
+    def key(self) -> str:
+        """Identidad estable entre ejecuciones (historial, comparación y revisiones)."""
+        ident = (self.path or self.name).strip().strip('"').lower()
+        return f"{self.source}|{ident}|{(self.sha256 or '').lower()}"
+
+    @property
     def image_name(self) -> str:
         """Nombre del ejecutable (para correlacionar con tcpvcon)."""
         return PureWindowsPath(self.path.strip('"')).name.lower() if self.path else ""

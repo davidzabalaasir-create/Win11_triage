@@ -33,6 +33,11 @@ class TriageResult:
     vt_stats: dict[str, int] | None = None
     errors: list[str] = field(default_factory=list)
     finished: datetime | None = None
+    reviews: dict[str, dict[str, Any]] = field(default_factory=dict)  # Finding.key → {state, note}
+
+    def review_of(self, f: Finding) -> dict[str, Any] | None:
+        rv = self.reviews.get(f.key)
+        return rv if rv and (rv.get("note") or rv.get("state") not in (None, "Pendiente")) else None
 
     @property
     def findings(self) -> list[Finding]:
@@ -81,6 +86,101 @@ def attack_summary(findings: list[Finding]) -> list[tuple[str, str, int]]:
 def why(f: Finding, n: int = 2) -> str:
     """Resumen corto de las señales positivas de mayor peso."""
     return " · ".join([s.title for s in f.unique_signals if s.weight > 0][:n])
+
+
+def timeline(findings: list[Finding], limit: int = 40) -> list[Finding]:
+    """Elementos con fecha (creación del fichero, arranque del proceso o fecha del evento), del más reciente al más antiguo."""
+    dated = [f for f in findings if f.created]
+    return sorted(dated, key=lambda f: f.created, reverse=True)[:limit]
+
+
+@dataclass
+class Diff:
+    new: list[Finding]
+    resolved: list[Finding]
+    worse: list[tuple[Finding, int]]  # (actual, puntuación anterior)
+    better: list[tuple[Finding, int]]
+
+
+def diff_results(previous: TriageResult, current: TriageResult, threshold: int = 10) -> Diff:
+    """Qué ha cambiado entre dos análisis (por Finding.key)."""
+    prev = {f.key: f for f in previous.findings}
+    cur = {f.key: f for f in current.findings}
+    worse, better = [], []
+    for k in cur.keys() & prev.keys():
+        delta = cur[k].score - prev[k].score
+        if delta >= threshold:
+            worse.append((cur[k], prev[k].score))
+        elif delta <= -threshold:
+            better.append((cur[k], prev[k].score))
+    return Diff(
+        new=sort_findings([cur[k] for k in cur.keys() - prev.keys()]),
+        resolved=sort_findings([prev[k] for k in prev.keys() - cur.keys()]),
+        worse=sorted(worse, key=lambda x: -x[0].score),
+        better=sorted(better, key=lambda x: -x[0].score),
+    )
+
+
+CSV_COLUMNS = ["estado", "score", "origen", "nombre", "ruta", "linea_comandos", "editor", "firma", "sha256", "vt",
+               "conexiones", "att&ck", "por_que", "revision", "nota", "nuevo"]  # fmt: skip
+
+
+def write_csv(path: Path, findings: list[Finding], reviews: dict[str, dict[str, Any]] | None = None,
+              new_keys: set[str] | None = None) -> Path:  # fmt: skip
+    """CSV con «;» y BOM UTF-8: Excel en español lo abre directamente."""
+    import csv
+
+    reviews, new_keys = reviews or {}, new_keys or set()
+    with path.open("w", newline="", encoding="utf-8-sig") as fh:
+        w = csv.writer(fh, delimiter=";")
+        w.writerow(CSV_COLUMNS)
+        for f in findings:
+            rv = reviews.get(f.key, {})
+            w.writerow([
+                f.status.value, f.score, f.source, f.name, f.path, f.cmdline, f.publisher, f.signature, f.sha256,
+                f.vt_summary, " | ".join(c.remote for c in f.connections), " ".join(f.attack),
+                " | ".join(s.title for s in f.unique_signals if s.weight > 0),
+                rv.get("state", "Pendiente"), rv.get("note", ""), "sí" if f.key in new_keys else "",
+            ])  # fmt: skip
+    return path
+
+
+def write_evidence_zip(r: TriageResult, path: Path, new_keys: set[str] | None = None) -> Path:
+    """Paquete para adjuntar a un ticket: informes, CSV, JSON, revisiones y SHA-256 de todo.
+
+    No incluye los ficheros sospechosos en sí (no se redistribuye malware).
+    """
+    import hashlib
+    import tempfile
+    import zipfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = Path(tmp)
+        files = write_reports(r, tmpdir, "all")
+        files.append(write_csv(tmpdir / f"{r.file_stem}.csv", sort_findings(r.findings), r.reviews, new_keys))
+        hashes = sorted({(f.sha256, f.name, f.path) for f in r.findings if f.sha256})
+        iocs = tmpdir / "iocs_sha256.txt"
+        iocs.write_text("".join(f"{h}  {name}  {p}\n" for h, name, p in hashes), encoding="utf-8")
+        files.append(iocs)
+        readme = tmpdir / "LEEME.txt"
+        readme.write_text(
+            f"Paquete de evidencias de win11-triage {__version__}\n"
+            f"Equipo: {r.host}  Usuario: {r.user}  Fecha: {r.started:%Y-%m-%d %H:%M:%S}\n"
+            f"Modo demostración: {'sí' if r.dry_run else 'no'}\n\n"
+            "Contenido: informe HTML/Markdown/JSON, CSV para Excel, SHA-256 de los elementos (iocs_sha256.txt)\n"
+            "y SHA256SUMS.txt para verificar la integridad de este paquete.\n"
+            "No incluye los ficheros sospechosos.\n",
+            encoding="utf-8",
+        )
+        files.append(readme)
+        sums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in files)
+        (tmpdir / "SHA256SUMS.txt").write_text(sums, encoding="utf-8")
+        files.append(tmpdir / "SHA256SUMS.txt")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for p in files:
+                zf.write(p, arcname=p.name)
+    return path
 
 
 SOURCE_LABEL = {"autoruns": "Persistencia", "sigcheck": "Carpeta usuario", "process": "Proceso", "event": "Evento"}
@@ -276,6 +376,10 @@ def render_markdown(r: TriageResult) -> str:
                 L.append(f"- **VirusTotal:** {_md(f.vt_summary)}")
             for c in f.connections:
                 L.append(f"- **Conexión:** {c.protocol} {_code(c.local)} → {_code(c.remote)} ({c.state}, PID {c.pid})")
+            rv = r.review_of(f)
+            if rv:
+                note = f" — {_md(rv['note'])}" if rv.get("note") else ""
+                L.append(f"- **Revisión del analista:** {_md(rv.get('state', 'Pendiente'))}{note}")
             if f.unique_signals:
                 L += ["", "| Señal | Peso | ATT&CK | Evidencia |", "|---|---|---|---|"]
                 L += [
@@ -284,6 +388,15 @@ def render_markdown(r: TriageResult) -> str:
                 ]
             L.append("")
         L += ["</details>", ""]
+
+    events = timeline(r.findings)
+    if events:
+        L += ["## Cronología", "", "| Fecha | Estado | Origen | Nombre |", "|---|---|---|---|"]
+        L += [
+            f"| {_md(f.created.replace('T', ' '))} | {f.status.icon} {f.score} | {SOURCE_LABEL.get(f.source, f.source)} | {_md(f.name)} |"
+            for f in events
+        ]
+        L.append("")
 
     L += [
         "---",
@@ -322,12 +435,21 @@ def to_json(r: TriageResult) -> dict[str, Any]:
         "vt_stats": r.vt_stats,
         "errors": r.errors,
         "sections": {title: [f.to_dict() for f in sort_findings(fs)] for title, fs in r.sections.items()},
-        "findings": [f.to_dict() for f in sort_findings(r.findings)],
+        "findings": [_with_review(r, f) for f in sort_findings(r.findings)],
     }
 
 
+def _with_review(r: TriageResult, f: Finding) -> dict[str, Any]:
+    d = f.to_dict()
+    d["key"] = f.key
+    rv = r.review_of(f)
+    if rv:
+        d["review"] = {"state": rv.get("state"), "note": rv.get("note", ""), "updated": rv.get("updated")}
+    return d
+
+
 def _finding_from_dict(d: dict[str, Any]) -> Finding:
-    skip = {"connections", "signals"}
+    skip = {"connections", "signals", "key", "review"}
     fields = {k: d.get(k) for k in Finding.__dataclass_fields__ if k in d and k not in skip}
     f = Finding(**fields)
     f.connections = [Connection(**c) for c in d.get("connections") or []]
@@ -492,6 +614,11 @@ def render_html(r: TriageResult) -> str:
                 ("Conexión", f"<code>{_e(x.local)} → {_e(x.remote)}</code> ({_e(x.state)}, PID {_e(x.pid)})")
                 for x in f.connections
             ]
+            rv = r.review_of(f)
+            if rv:
+                items.append(
+                    ("Revisión", f"<b>{_e(rv.get('state'))}</b>" + (f" — {_e(rv['note'])}" if rv.get("note") else ""))
+                )
             dl = "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in items)
             sig_rows = "".join(
                 f"<tr><td>{_e(x.title)}</td><td>{x.weight:+d}</td><td>{_e(x.attack)}</td>"
@@ -507,6 +634,19 @@ def render_html(r: TriageResult) -> str:
                 f"<details><summary><span class='badge' style='--c:{_HTML_COLOR[f.status]}'>{f.status.value}</span> "
                 f"{_e(f.name)} <span class='muted'>· score {f.score}</span></summary><dl>{dl}</dl>{sig_table}</details>"
             )
+
+    events = timeline(r.findings)
+    if events:
+        rows = "".join(
+            f"<tr><td><code>{_e(f.created.replace('T', ' '))}</code></td>"
+            f"<td><span class='badge' style='--c:{_HTML_COLOR[f.status]}'>{f.score}</span></td>"
+            f"<td>{_e(SOURCE_LABEL.get(f.source, f.source))}</td><td>{_e(f.name)}</td></tr>"
+            for f in events
+        )
+        parts.append(
+            "<h2>Cronología</h2><table><tr><th>Fecha</th><th>Score</th><th>Origen</th><th>Nombre</th></tr>"
+            f"{rows}</table>"
+        )
 
     conns = unique_connections(r.findings)
     if conns:

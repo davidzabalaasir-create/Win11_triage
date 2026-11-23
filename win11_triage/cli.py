@@ -17,6 +17,7 @@ from . import __copyright__, __version__, env_check, report
 from .engine import Reporter, TriageEngine, TriageOptions
 from .models import Cancelled, Finding, Status
 from .report import TriageResult
+from .review import ReviewStore
 from .virustotal import VTResult
 from .whitelist import WhitelistError
 
@@ -77,6 +78,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="formato del informe: md, html, json, both (md+json) o all (por defecto: md)",
     )
     opt.add_argument("--no-report", action="store_true", help="no exportar informe")
+    opt.add_argument(
+        "--evidence",
+        action="store_true",
+        help="genera además un paquete de evidencias .zip (informes, CSV, IoC, SHA256SUMS)",
+    )
+    opt.add_argument("--min-score", type=int, metavar="N", help="muestra e informa solo los elementos con score ≥ N")
+    opt.add_argument(
+        "--fail-on-score",
+        type=int,
+        metavar="N",
+        help="código de salida 2 si algún elemento tiene score ≥ N (además de las detecciones de VT)",
+    )
+    opt.add_argument("--check-update", action="store_true", help="comprueba si hay una versión nueva y sale")
     opt.add_argument("--no-color", action="store_true", help="desactiva los colores")
     opt.add_argument(
         "-v", "--verbose", action="store_true", help="muestra comandos ejecutados y detalles de depuración"
@@ -247,14 +261,42 @@ def run(args: argparse.Namespace) -> int:
     finally:
         reporter.done()
 
+    if args.min_score is not None:
+        hidden = sum(1 for f in res.findings if f.score < args.min_score)
+        res.sections = {t: [f for f in fs if f.score >= args.min_score] for t, fs in res.sections.items()}
+        console.print(f"[dim]--min-score {args.min_score}: {hidden} elemento(s) por debajo ocultos.[/]")
+
+    review_store = ReviewStore(opts.config_dir)  # type: ignore[arg-type]
+    res.reviews = review_store.data
     print_results(res)
     if not args.no_report:
         for path in report.write_reports(res, args.output_dir, args.format):
             console.print(f"[bold]Informe:[/] {path}")
+    if args.evidence:
+        zip_path = report.write_evidence_zip(res, args.output_dir / f"{res.file_stem}_evidencias.zip")
+        console.print(f"[bold]Paquete de evidencias:[/] {zip_path}")
 
     if opts.dry_run:
         return EXIT_OK  # el dry-run solo valida la estructura
-    return EXIT_DETECTED if res.counts()[Status.DETECTED] else EXIT_OK
+    over = args.fail_on_score is not None and any(f.score >= args.fail_on_score for f in res.findings)
+    return EXIT_DETECTED if (res.counts()[Status.DETECTED] or over) else EXIT_OK
+
+
+def check_update() -> int:
+    import requests
+
+    from .updates import check_latest
+
+    try:
+        info = check_latest()
+    except requests.RequestException as e:
+        console.print(f"[yellow]No se pudo comprobar: {e}[/]")
+        return EXIT_ENV
+    if info.available:
+        console.print(f"[green]Hay una versión nueva: {info.latest}[/] (tienes {info.current}) → {info.url}")
+    else:
+        console.print(f"Tienes la última versión ({info.current}).")
+    return EXIT_OK
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -264,6 +306,8 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
     args = parse_args(argv)
+    if args.check_update:
+        return check_update()
     if args.gui:
         from .gui import main as gui_main
 

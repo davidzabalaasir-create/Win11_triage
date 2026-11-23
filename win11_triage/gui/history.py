@@ -35,7 +35,7 @@ def finding_key(source: str, path: str, sha256: str, name: str = "") -> str:
 
 
 def key_of(f: Finding) -> str:
-    return finding_key(f.source, f.path, f.sha256, f.name)
+    return f.key
 
 
 def list_reports(folder: Path, limit: int = 200) -> list[HistoryEntry]:

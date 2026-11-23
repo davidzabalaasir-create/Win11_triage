@@ -126,3 +126,36 @@ def test_empty_state_and_demo_button(app):
     app.start_demo()
     _pump_until(app, lambda: app.result is not None and not app.worker.is_alive())
     assert app.home_empty.winfo_manager() == ""
+
+
+def test_review_workflow_compare_and_evidence(app, tmp_path):
+    from win11_triage.review import ReviewStore
+
+    _run(app)
+    app.filter_btn.set("Todos")
+    app.render_table()
+    first = app.tree.get_children()[0]
+    app.tree.selection_set(first)
+    app.update()
+    app.set_review("Falso positivo")
+    app.note_box.insert("1.0", "Herramienta interna")
+    app.save_note()
+    stored = ReviewStore(tmp_path).get(app.findings[int(first)].key)
+    assert stored["state"] == "Falso positivo" and stored["note"] == "Herramienta interna"
+    assert "Revisados 1/" in app.review_progress.cget("text")
+    app.review_filter.set("Falso positivo")
+    app.render_table()
+    assert len(app.tree.get_children()) == 1
+
+    zpath = app.export_evidence(tmp_path / "ev.zip")
+    assert zpath.exists()
+
+    time.sleep(1.1)
+    _run(app)
+    app.refresh_history()
+    app.history_tree.selection_set(str(len(app.history_entries) - 1))  # el más antiguo
+    app.compare_with_selected()
+    app.update()
+    dialogs = [w for w in app.winfo_children() if w.__class__.__name__ == "CompareDialog"]
+    assert dialogs and dialogs[0].diff.new == [] and dialogs[0].diff.resolved == []
+    dialogs[0].destroy()

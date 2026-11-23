@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import contextlib
 import copy
-import csv
 import logging
 import os
 import queue
@@ -34,12 +33,13 @@ from ..engine import PLACEHOLDER_KEY, Reporter, TriageEngine, TriageOptions
 from ..enrich import pe_static, yara_scan
 from ..models import Cancelled, Finding, Status
 from ..report import TriageResult
+from ..review import PENDING, STATE_KEYS, STATE_TOKEN, STATES, ReviewStore
 from ..rules.attack import attack_url, technique_name
 from ..utils import expand_win_vars
 from ..virustotal import GUI_URL
 from ..whitelist import Whitelist, WhitelistError, add_to_whitelist, remove_from_whitelist
 from . import history, settings
-from .dialogs import PRESETS, NewScanDialog
+from .dialogs import PRESETS, CompareDialog, NewScanDialog
 from .theme import (
     CONTROL_H,
     ICON_ICO,
@@ -77,6 +77,7 @@ from .widgets import (
     icon_button,
     load_logo,
     make_dot,
+    option_style,
     primary_button,
     secondary_button,
     segmented_style,
@@ -173,6 +174,7 @@ class TriageApp(ctk.CTk):
         self.selected: Finding | None = None
         self._detail_lines: list[str] = []
         self._loaded_suffix = ""
+        self.reviews = ReviewStore(config_dir)
         self.tools = env_check.check_all()
         self.windows = env_check.is_windows()
         self.admin = env_check.is_admin()
@@ -479,6 +481,17 @@ class TriageApp(ctk.CTk):
         bar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, SPACE["m"]))
         self.filter_btn = FilterChips(bar, list(FILTERS), command=lambda _v: self.render_table())
         self.filter_btn.pack(side="left")
+        self.review_filter = ctk.StringVar(value="Cualquier revisión")
+        ctk.CTkOptionMenu(
+            bar,
+            values=["Cualquier revisión", *STATES],
+            variable=self.review_filter,
+            command=lambda _v: self.render_table(),
+            width=190,
+            **{**option_style(), "height": 30},
+        ).pack(side="left", padx=(SPACE["s"], 0))
+        self.review_progress = ctk.CTkLabel(bar, text="", font=font("caption"), text_color=T("text2"))
+        self.review_progress.pack(side="left", padx=SPACE["l"])
         self.only_new = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
             bar,
@@ -494,19 +507,21 @@ class TriageApp(ctk.CTk):
         self.tree = self._tree(
             holder,
             (
-                ("score", "Score", 60, False),
-                ("origen", "Origen", 118, False),
-                ("nombre", "Nombre", 140, False),
-                ("ruta", "Ruta", 170, True),
-                ("why", "Por qué", 190, True),
-                ("vt", "VT", 100, False),
-                ("red", "Red", 44, False),
+                ("score", "Score", 56, False),
+                ("origen", "Origen", 106, False),
+                ("nombre", "Nombre", 136, False),
+                ("ruta", "Ruta", 150, True),
+                ("why", "Por qué", 160, True),
+                ("vt", "VT", 96, False),
+                ("rev", "Revisión", 126, False),
             ),
             sortable=True,
         )
         self.tree.bind("<<TreeviewSelect>>", lambda _e: self.show_detail())
         self.tree.bind("<Double-1>", lambda _e: self.open_vt())
         self.tree.bind("<Button-3>", self.popup_finding_menu)
+        for key, state in STATE_KEYS.items():  # p / r / f / c: revisar sin ratón
+            self.tree.bind(f"<KeyPress-{key}>", lambda _e, st=state: self.set_review(st))
         self.empty_label = ctk.CTkLabel(
             holder, text="", font=font("body"), text_color=T("text2"), fg_color=T("surface")
         )
@@ -563,6 +578,9 @@ class TriageApp(ctk.CTk):
         bar = ctk.CTkFrame(page, fg_color="transparent")
         bar.pack(fill="x", pady=(0, SPACE["m"]))
         primary_button(bar, "Cargar análisis", self.load_history_entry, icon="history").pack(side="left")
+        secondary_button(bar, "Comparar con el actual", self.compare_with_selected, icon="history").pack(
+            side="left", padx=(SPACE["s"], 0)
+        )
         secondary_button(bar, "Abrir informe", self.open_history_report, icon="open").pack(side="left", padx=SPACE["s"])
         secondary_button(bar, "Carpeta de informes", self.open_reports_dir, icon="folder").pack(side="left")
         icon_button(bar, "undo", self.refresh_history, "Actualizar lista", size=CONTROL_H).pack(side="right")
@@ -625,6 +643,13 @@ class TriageApp(ctk.CTk):
         ):
             secondary_button(data, text, cmd, icon=ic, anchor="w").pack(fill="x", padx=SPACE["l"], pady=(0, SPACE["s"]))
         ctk.CTkFrame(data, fg_color="transparent", height=SPACE["s"]).pack()
+
+        upd = section(
+            2, 1, "Actualizaciones", f"Versión instalada: {__version__}. Solo se consulta GitHub cuando lo pides."
+        )
+        secondary_button(upd, "Buscar actualizaciones", self.check_updates, icon="undo", width=220).pack(
+            anchor="w", padx=SPACE["l"], pady=(0, SPACE["l"])
+        )
 
         if self.windows and not self.admin:
             adm = section(2, 0, "Privilegios", "Sin administrador, autoruns y los eventos de seguridad ven menos.")
@@ -919,6 +944,19 @@ class TriageApp(ctk.CTk):
             self.set_status(f"VirusTotal: siguiente consulta en {ev[1]:4.1f} s (límite del plan gratuito)")
         elif kind == "result":
             self.finish(ev[1])
+        elif kind == "update":
+            _, available, latest, url = ev
+            if available:
+                toast(
+                    self,
+                    f"Nueva versión {latest} disponible",
+                    "info",
+                    8000,
+                    action=("Descargar", lambda: webbrowser.open(url)),
+                )
+            else:
+                toast(self, f"Tienes la última versión ({__version__}).", "success")
+            self.set_status("Listo.")
         elif kind == "tools_refresh":
             self.set_running(False)
             self.refresh_tools()
@@ -944,6 +982,7 @@ class TriageApp(ctk.CTk):
         self.progress.set(1)
         fmt = FORMATS[self.var_format.get()]
         reports: list[Path] = []
+        res.reviews = self.reviews.data
         if fmt:
             reports = report.write_reports(res, self.reports_dir, fmt)
             if fmt not in ("json", "all"):  # el historial necesita siempre el JSON
@@ -1052,6 +1091,8 @@ class TriageApp(ctk.CTk):
                 continue
             if self.only_new.get() and history.key_of(f) not in self.new_keys:
                 continue
+            if self.review_filter.get() in STATES and self.reviews.state(f.key) != self.review_filter.get():
+                continue
             if q:
                 hay = " ".join(
                     [
@@ -1078,6 +1119,7 @@ class TriageApp(ctk.CTk):
             "why": lambda r: report.why(r[1]).lower(),
             "vt": lambda r: -((r[1].vt or {}).get("malicious", -1)),
             "red": lambda r: -len(r[1].connections),
+            "rev": lambda r: STATES.index(self.reviews.state(r[1].key)),
         }
         return sorted(rows, key=sorters[key], reverse=reverse)
 
@@ -1090,8 +1132,8 @@ class TriageApp(ctk.CTk):
             "nombre": "Nombre",
             "ruta": "Ruta",
             "why": "Por qué",
-            "vt": "VirusTotal",
-            "red": "Red",
+            "vt": "VT",
+            "rev": "Revisión",
         }
         arrow = " ▴" if self.sort_key[1] else " ▾"
         self.tree.heading("#0", text="Estado" + (arrow if key == "estado" else ""))
@@ -1118,7 +1160,7 @@ class TriageApp(ctk.CTk):
                     elide_middle(f.path or "—", 40),
                     report.why(f) or f.signature,
                     f.vt_summary,
-                    len(f.connections) or "—",
+                    self._review_label(f),
                 ),
             )
         keep = [s for s in selected if self.tree.exists(s)]
@@ -1131,6 +1173,11 @@ class TriageApp(ctk.CTk):
             if st:
                 counts[label] = sum(1 for f in self.findings if f.status is st)
         self.filter_btn.set_counts(counts if self.findings else {})
+        if self.findings:
+            done = sum(1 for f in self.findings if self.reviews.state(f.key) != PENDING)
+            self.review_progress.configure(text=f"Revisados {done}/{len(self.findings)}  ·  teclas P R F C")
+        else:
+            self.review_progress.configure(text="")
         self.nav.set_label("findings", f"Hallazgos  ({len(self.findings)})" if self.findings else "Hallazgos")
         self.render_empty_state(bool(rows))
 
@@ -1233,6 +1280,47 @@ class TriageApp(ctk.CTk):
         ).pack(anchor="w", padx=SPACE["m"])
         self._detail_lines.append(f"{f.status.value} · score {f.score} — {f.name}")
 
+        box = self._section("Revisión del analista")
+        rv = self.reviews.get(f.key)
+        grid = ctk.CTkFrame(box, fg_color="transparent")
+        grid.pack(fill="x")
+        grid.grid_columnconfigure((0, 1), weight=1, uniform="rv")
+        soft = {"text2": "surface2", "info": "info_soft", "success": "success_soft", "danger": "danger_soft"}
+        for i, st in enumerate(STATES):
+            token = STATE_TOKEN[st]
+            active = st == rv["state"]
+            key = next(k for k, v in STATE_KEYS.items() if v == st).upper()
+            ctk.CTkButton(
+                grid,
+                text=f"{st}  ·  {key}",
+                height=30,
+                corner_radius=15,
+                border_width=1,
+                font=font("caption_bold" if active else "caption"),
+                fg_color=T(soft[token]) if active else "transparent",
+                border_color=T(token) if active else T("border"),
+                text_color=T(token) if active and token != "text2" else T("text"),
+                hover_color=T("surface2"),
+                command=lambda s_=st: self.set_review(s_),
+            ).grid(
+                row=i // 2, column=i % 2, sticky="ew", padx=(0 if i % 2 == 0 else SPACE["xs"], 0), pady=(0, SPACE["xs"])
+            )
+        self.note_box = ctk.CTkTextbox(
+            box,
+            height=64,
+            fg_color=T("surface2"),
+            border_width=1,
+            border_color=T("border"),
+            font=font("body"),
+            wrap="word",
+        )
+        self.note_box.pack(fill="x", pady=(SPACE["s"], SPACE["xs"]))
+        if rv.get("note"):
+            self.note_box.insert("1.0", rv["note"])
+        self.save_note_btn = ghost_button(box, "Guardar nota", self.save_note, width=120)
+        self.save_note_btn.pack(anchor="e")
+        self._detail_lines.append(f"Revisión: {rv['state']} {rv.get('note', '')}")
+
         if f.unique_signals:
             box = self._section("Por qué")
             for s in f.unique_signals:
@@ -1282,6 +1370,87 @@ class TriageApp(ctk.CTk):
         self.more_btn.configure(state="normal")
         with contextlib.suppress(AttributeError, tk.TclError):
             self.detail_body._parent_canvas.yview_moveto(0)
+
+    def _review_label(self, f: Finding) -> str:
+        rv = self.reviews.get(f.key)
+        mark = {"Pendiente": "", "En revisión": "◐ ", "Falso positivo": "✓ ", "Confirmado": "✕ "}[rv["state"]]
+        return f"{mark}{rv['state']}" + (" ✎" if rv.get("note") else "")
+
+    def _reselect(self, sel: tuple[str, ...]) -> None:
+        if sel and self.tree.exists(sel[0]):
+            self.tree.selection_set(sel[0])
+            self.tree.focus(sel[0])
+            self.tree.see(sel[0])
+
+    def set_review(self, state: str) -> None:
+        f = self.selected_finding()
+        if f is None:
+            return
+        self.reviews.set(f.key, state=state, name=f.name)
+        sel = self.tree.selection()
+        self.render_table()
+        self._reselect(sel)
+        self.set_status(f"«{f.name}» marcado como {state}.")
+
+    def save_note(self) -> None:
+        f = self.selected_finding()
+        if f is None:
+            return
+        self.reviews.set(f.key, note=self.note_box.get("1.0", "end"), name=f.name)
+        sel = self.tree.selection()
+        self.render_table()
+        self._reselect(sel)
+        flash_button(self.save_note_btn, f"{glyph('check')}  Guardada")
+
+    def compare_with_selected(self) -> None:
+        e = self.selected_history()
+        if e is None or self.result is None:
+            toast(self, "Carga o ejecuta un análisis y selecciona otro del historial para compararlos.")
+            return
+        try:
+            other = report.load_json(e.path)
+        except (OSError, ValueError, KeyError, TypeError) as err:
+            messagebox.showerror("No se pudo cargar", f"{e.path.name}: {err}", parent=self)
+            return
+        prev, cur = (other, self.result) if other.started <= self.result.started else (self.result, other)
+        CompareDialog(self, prev, cur, f"{prev.started:%d/%m/%Y %H:%M} → {cur.started:%d/%m/%Y %H:%M}")
+
+    def export_evidence(self, path: Path | None = None) -> Path | None:
+        if self.result is None:
+            toast(self, "Aún no hay resultados que exportar.")
+            return None
+        if path is None:
+            chosen = filedialog.asksaveasfilename(
+                parent=self,
+                defaultextension=".zip",
+                initialfile=f"{self.result.file_stem}_evidencias.zip",
+                filetypes=[("ZIP", "*.zip")],
+            )
+            if not chosen:
+                return None
+            path = Path(chosen)
+        self.result.reviews = self.reviews.data
+        report.write_evidence_zip(self.result, path, self.new_keys)
+        self.log_line("INFO", f"Paquete de evidencias: {path}")
+        target = path
+        toast(
+            self, f"Paquete creado: {path.name}", "success", action=("Abrir carpeta", lambda: open_path(target.parent))
+        )
+        return path
+
+    def check_updates(self) -> None:
+        from ..updates import check_latest
+
+        self.set_status("Buscando actualizaciones…")
+
+        def work() -> None:
+            try:
+                info = check_latest()
+                self.events.put(("update", info.available, info.latest, info.url))
+            except Exception as e:
+                self.events.put(("log", "AVISO", f"No se pudo comprobar si hay actualizaciones: {e}"))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def jump_to_priority(self) -> None:
         sel = self.priority_tree.selection()
@@ -1503,6 +1672,8 @@ class TriageApp(ctk.CTk):
         menu.add_separator()
         for label, fmt in (("Informe HTML…", "html"), ("Informe Markdown…", "md"), ("JSON (esquema v2)…", "json")):
             menu.add_command(label=label, command=lambda f=fmt: self.export_report(f), state=st)
+        menu.add_separator()
+        menu.add_command(label="Paquete de evidencias (.zip)…", command=self.export_evidence, state=st)
         menu.tk_popup(self.export_btn.winfo_rootx(), self.export_btn.winfo_rooty() + self.export_btn.winfo_height() + 4)
 
     def export_csv(self, path: Path | None = None) -> Path | None:
@@ -1519,32 +1690,7 @@ class TriageApp(ctk.CTk):
             if not chosen:
                 return None
             path = Path(chosen)
-        cols = [
-            "estado",
-            "score",
-            "origen",
-            "nombre",
-            "ruta",
-            "linea_comandos",
-            "editor",
-            "firma",
-            "sha256",
-            "vt",
-            "conexiones",
-            "att&ck",
-            "por_que",
-            "nuevo",
-        ]
-        with path.open("w", newline="", encoding="utf-8-sig") as fh:  # utf-8-sig: Excel lo abre bien
-            w = csv.writer(fh, delimiter=";")
-            w.writerow(cols)
-            for _, f in self.visible_rows():
-                w.writerow([
-                    f.status.value, f.score, f.source, f.name, f.path, f.cmdline, f.publisher, f.signature,
-                    f.sha256, f.vt_summary, " | ".join(cn.remote for cn in f.connections), " ".join(f.attack),
-                    " | ".join(s.title for s in f.unique_signals if s.weight > 0),
-                    "sí" if history.key_of(f) in self.new_keys else "",
-                ])  # fmt: skip
+        report.write_csv(path, [f for _, f in self.visible_rows()], self.reviews.data, self.new_keys)
         self.log_line("INFO", f"CSV exportado: {path}")
         toast(self, f"Exportado: {path.name}", "success", action=("Abrir", lambda: open_path(path)))
         return path
@@ -1559,6 +1705,7 @@ class TriageApp(ctk.CTk):
         if not chosen:
             return
         target = Path(chosen)
+        self.result.reviews = self.reviews.data
         written = report.write_reports(self.result, target.parent, fmt)[0]
         if written != target:
             written.replace(target)

@@ -102,6 +102,15 @@ win11-triage-gui          # o: win11-triage --gui · o desde el menú Inicio si 
 | **Ajustes** | Clave de VirusTotal, apariencia (Sistema / Claro / Oscuro), herramientas (con instalación por winget), lista blanca, reglas YARA y carpetas. |
 | **Barra de estado** | Estado del entorno (administrador, Sysinternals, VirusTotal), progreso y el **Registro** plegable (`Ctrl+L`). |
 
+**Flujo de trabajo del analista:**
+- **Revisión:** marca cada elemento como *Pendiente*, *En revisión*, *Falso positivo* o *Confirmado* con las teclas `P` `R` `F` `C` o desde el detalle, y añade notas.
+  - Se guarda en `review.json` y se recuerda si el mismo elemento vuelve a aparecer.
+  - Sale en los informes y en el CSV.
+  - Puedes filtrar la tabla por estado de revisión.
+- **Comparar análisis:** en Historial, «Comparar con el actual» muestra los elementos nuevos, los resueltos y los que empeoran o mejoran (±10 puntos).
+- **Paquete de evidencias:** Exportar → «Paquete de evidencias (.zip)» incluye los informes HTML, MD y JSON, el CSV, las revisiones, los IoC SHA-256, un `LEEME.txt` y un `SHA256SUMS.txt` para verificar la integridad. No incluye los ficheros sospechosos.
+- **Actualizaciones:** Ajustes → «Buscar actualizaciones». Solo se consulta GitHub cuando lo pides.
+
 **Detalles de uso:**
 - Ignorar una ruta o un hash se aplica al momento y se puede **deshacer** desde el aviso.
 - Copiar un hash confirma en el propio botón.
@@ -137,6 +146,10 @@ win11-triage --dry-run                # demostración con datos de ejemplo
 | `--vt-limit N` | Máximo de consultas **nuevas** a VirusTotal (las de caché no cuentan) |
 | `--format md\|html\|json\|both\|all` | Formato del informe (`both` = md + json, `all` = los tres) |
 | `--output-dir DIR` / `--config-dir DIR` | Carpeta de informes / de `.env`, `whitelist.json`, `vt_cache.json` y `yara/` |
+| `--evidence` | Además, paquete de evidencias `.zip` |
+| `--min-score N` | Muestra e informa solo los elementos con score ≥ N |
+| `--fail-on-score N` | Código de salida 2 si algún elemento llega a N (para pipelines y tareas programadas) |
+| `--check-update` | Comprueba si hay una versión nueva |
 | `--no-report` · `--no-color` · `-v` · `--gui` | Sin informe · sin colores · detallado · abrir la interfaz |
 
 **Códigos de salida:**
@@ -155,7 +168,8 @@ En `reportes/triage_<equipo>_<fecha>.{html,md,json}`. Incluyen:
 - **«Prioriza esto primero»** (los 5 elementos de mayor puntuación);
 - tabla de **técnicas ATT&CK** con enlaces a attack.mitre.org;
 - una tabla por módulo con su puntuación y el «por qué»;
-- detalle de cada elemento con sus señales (peso, técnica y evidencia), sus conexiones y VirusTotal.
+- detalle de cada elemento con sus señales (peso, técnica y evidencia), sus conexiones, VirusTotal y la **revisión del analista**;
+- **cronología**: los elementos con fecha, ordenados del más reciente al más antiguo.
 
 El **HTML** es un único archivo que se puede imprimir a PDF. El **JSON** (`schema_version: 2`) está pensado para SIEM y automatización:
 

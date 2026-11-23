@@ -4,6 +4,17 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y 
 
 ## [2.1.0] — 2026-11-23
 
+### Añadido
+- **Revisión del analista**:
+  - estados Pendiente, En revisión, Falso positivo y Confirmado, con notas;
+  - atajos `P` `R` `F` `C`, filtro y progreso «Revisados X/Y»;
+  - persistente entre sesiones (`review.json`) e incluida en los informes, el JSON y el CSV.
+- **Comparar análisis** desde el Historial: nuevos, resueltos, empeoran y mejoran.
+- **Paquete de evidencias** `.zip`: informes, CSV, revisiones, IoC SHA-256, LEEME y SHA256SUMS. Desde la GUI o con `--evidence`.
+- **Cronología** en los informes HTML y Markdown.
+- CLI: `--min-score`, `--fail-on-score` y `--check-update`.
+- **Buscar actualizaciones** en Ajustes (consulta manual a GitHub Releases).
+
 ### Cambiado
 - **Rediseño completo de la interfaz**:
   - sistema de diseño con tokens de color (claro y oscuro), escala tipográfica (Segoe UI Variable, Cascadia Mono para rutas y hashes), rejilla de 4 px e iconos Segoe Fluent con alternativa Unicode;
