@@ -14,6 +14,7 @@ import re
 import shlex
 import subprocess
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from .collectors import decode_output
@@ -191,14 +192,28 @@ def collect_events(days: int) -> tuple[list[Finding], list[str]]:
     """Devuelve (hallazgos, avisos de registros no disponibles)."""
     findings: list[Finding] = []
     warnings: list[str] = []
-    for log, ids in LOGS:
-        try:
-            events = parse_events(query_log(log, ids, days))
-        except (RuntimeError, OSError, subprocess.TimeoutExpired, ET.ParseError) as e:
-            warnings.append(f"Eventos de «{log}» no disponibles: {e}")
+    for log, got in _query_all(LOGS, days):
+        if isinstance(got, Exception):
+            warnings.append(f"Eventos de «{log}» no disponibles: {got}")
             continue
-        findings += [f for f in map(event_to_finding, events) if f]
+        findings += [f for f in map(event_to_finding, got) if f]
     return findings, warnings
+
+
+def _query_all(
+    logs: list[tuple[str, tuple[int, ...]]], days: int, max_events: int = 500
+) -> list[tuple[str, list[Event] | Exception]]:
+    """Consulta varios registros a la vez (cada wevtutil espera sobre todo a disco)."""
+
+    def one(item: tuple[str, tuple[int, ...]]) -> tuple[str, list[Event] | Exception]:
+        log, ids = item
+        try:
+            return log, parse_events(query_log(log, ids, days, max_events))
+        except (RuntimeError, OSError, subprocess.TimeoutExpired, ET.ParseError) as e:
+            return log, e
+
+    with ThreadPoolExecutor(max_workers=min(4, len(logs)) or 1, thread_name_prefix="wevtutil") as pool:
+        return list(pool.map(one, logs))
 
 
 def collect_raw_events(days: int, max_events: int = 2000) -> tuple[list[Event], list[str], bool]:
@@ -206,10 +221,9 @@ def collect_raw_events(days: int, max_events: int = 2000) -> tuple[list[Event], 
     events: list[Event] = []
     warnings: list[str] = []
     sysmon = False
-    for log, ids in SIGMA_LOGS:
-        try:
-            got = parse_events(query_log(log, ids, days, max_events))
-        except (RuntimeError, OSError, subprocess.TimeoutExpired, ET.ParseError) as e:
+    for log, got in _query_all(SIGMA_LOGS, days, max_events):
+        if isinstance(got, Exception):
+            e = got
             if "Sysmon" in log:
                 warnings.append("Sysmon no está instalado o su registro no es accesible: solo se usan 4688/4104/7045.")
             else:

@@ -16,7 +16,9 @@ from __future__ import annotations
 import fnmatch
 import ipaddress
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -66,61 +68,113 @@ def normalize(ev: Event) -> dict[str, str]:
 
 
 # ------------------------------------------------------------------ coincidencia de valores
-def _value_match(actual: str, expected: Any, mods: list[str]) -> bool:
-    if expected is None:
-        return actual == ""
-    exp = str(expected)
-    if "re" in mods:
-        return re.search(exp, actual, re.IGNORECASE) is not None
-    if "cidr" in mods:
-        try:
-            return ipaddress.ip_address(actual) in ipaddress.ip_network(exp, strict=False)
-        except ValueError:
-            return False
-    a, e = actual.lower(), exp.lower()
-    if "contains" in mods:
-        return e in a
-    if "startswith" in mods:
-        return a.startswith(e)
-    if "endswith" in mods:
-        return a.endswith(e)
-    if "*" in e or "?" in e:
-        return fnmatch.fnmatchcase(a, e)
-    return a == e
+class _Event:
+    """Evento preparado una sola vez: campos originales, en minúsculas y texto completo."""
+
+    __slots__ = ("_blob", "low", "raw")
+
+    def __init__(self, raw: dict[str, str]) -> None:
+        self.raw = raw
+        self.low = {k: v.lower() for k, v in raw.items()}
+        self._blob: str | None = None
+
+    @property
+    def blob(self) -> str:
+        if self._blob is None:
+            self._blob = " ".join(self.low.values())
+        return self._blob
 
 
-def _field_match(event: dict[str, str], key: str, expected: Any) -> bool:
+@lru_cache(maxsize=4096)
+def _split_key(key: str) -> tuple[str, frozenset[str]]:
     name, *mods = key.split("|")
-    actual = event.get(name)
-    if actual is None:
-        return False
-    values = expected if isinstance(expected, list) else [expected]
-    if "all" in mods:
-        return all(_value_match(actual, v, mods) for v in values)
-    return any(_value_match(actual, v, mods) for v in values)
+    return name, frozenset(mods)
 
 
-def _selection_match(event: dict[str, str], sel: Any) -> bool:
-    if isinstance(sel, list):  # lista de mapas → OR; lista de cadenas → palabra clave en cualquier campo
-        if all(isinstance(x, dict) for x in sel):
-            return any(_selection_match(event, x) for x in sel)
-        blob = " ".join(event.values()).lower()
-        return any(str(x).lower() in blob for x in sel)
-    if isinstance(sel, dict):
-        return all(_field_match(event, k, v) for k, v in sel.items())
-    return False
+@lru_cache(maxsize=4096)
+def _regex(pattern: str) -> re.Pattern[str]:
+    return re.compile(pattern, re.IGNORECASE)
 
 
-# ------------------------------------------------------------------ condiciones
+# ------------------------------------------------------------------ compilación
+# Cada regla se compila una vez a funciones: los valores esperados ya van en minúsculas, los
+# modificadores resueltos y la condición convertida en un árbol. Evaluar un evento es entonces
+# llamar a esas funciones, sin volver a interpretar la regla.
+Pred = Callable[[_Event], bool]
 _TOKEN = re.compile(r"\(|\)|\band\b|\bor\b|\bnot\b|\b1 of\b|\ball of\b|[\w*]+", re.IGNORECASE)
 
 
-class _Cond:
-    def __init__(self, text: str, sels: dict[str, Any], event: dict[str, str]) -> None:
-        self.tokens = [
-            t.lower() if t.lower() in ("and", "or", "not", "1 of", "all of") else t for t in _TOKEN.findall(text)
-        ]
-        self.i, self.sels, self.event = 0, sels, event
+def _compile_value(expected: Any, mods: frozenset[str]) -> Callable[[str, str], bool]:
+    if expected is None:
+        return lambda actual, _a: actual == ""
+    exp = str(expected)
+    if "re" in mods:
+        rx = _regex(exp)
+        return lambda actual, _a: rx.search(actual) is not None
+    if "cidr" in mods:
+        try:
+            net = ipaddress.ip_network(exp, strict=False)
+        except ValueError:
+            return lambda _x, _a: False
+
+        def in_net(actual: str, _a: str) -> bool:
+            try:
+                return ipaddress.ip_address(actual) in net
+            except ValueError:
+                return False
+
+        return in_net
+    e = exp.lower()
+    if "contains" in mods:
+        return lambda _x, a: e in a
+    if "startswith" in mods:
+        return lambda _x, a: a.startswith(e)
+    if "endswith" in mods:
+        return lambda _x, a: a.endswith(e)
+    if "*" in e or "?" in e:
+        rx = re.compile(fnmatch.translate(e), re.S)
+        return lambda _x, a: rx.match(a) is not None
+    return lambda _x, a: a == e
+
+
+def _compile_field(key: str, expected: Any) -> Pred:
+    name, mods = _split_key(key)
+    checks = [_compile_value(v, mods) for v in (expected if isinstance(expected, list) else [expected])]
+    combine = all if "all" in mods else any
+
+    def field(ev: _Event) -> bool:
+        actual = ev.raw.get(name)
+        if actual is None:
+            return False
+        low = ev.low[name]
+        return combine(c(actual, low) for c in checks)
+
+    return field
+
+
+def _compile_selection(sel: Any) -> Pred:
+    if isinstance(sel, list):
+        if all(isinstance(x, dict) for x in sel):
+            parts = [_compile_selection(x) for x in sel]
+            return lambda ev: any(p(ev) for p in parts)
+        words = [str(x).lower() for x in sel]  # palabras clave en cualquier campo
+        return lambda ev: any(w in ev.blob for w in words)
+    if isinstance(sel, dict):
+        fields = [_compile_field(k, v) for k, v in sel.items()]
+        return lambda ev: all(f(ev) for f in fields)
+    return lambda _ev: False
+
+
+@lru_cache(maxsize=1024)
+def _tokens(text: str) -> tuple[str, ...]:
+    return tuple(t.lower() if t.lower() in ("and", "or", "not", "1 of", "all of") else t for t in _TOKEN.findall(text))
+
+
+class _Parser:
+    """Convierte la condición en un predicado (precedencia: not > and > or)."""
+
+    def __init__(self, text: str, sels: dict[str, Pred]) -> None:
+        self.tokens, self.i, self.sels = _tokens(text), 0, sels
 
     def _peek(self) -> str | None:
         return self.tokens[self.i] if self.i < len(self.tokens) else None
@@ -130,43 +184,53 @@ class _Cond:
         self.i += 1
         return tok
 
-    def parse(self) -> bool:
+    def parse(self) -> Pred:
         return self._or()
 
-    def _or(self) -> bool:
-        val = self._and()
+    def _or(self) -> Pred:
+        parts = [self._and()]
         while self._peek() == "or":
             self._take()
-            val = self._and() or val
-        return val
+            parts.append(self._and())
+        return parts[0] if len(parts) == 1 else (lambda ev: any(p(ev) for p in parts))
 
-    def _and(self) -> bool:
-        val = self._not()
+    def _and(self) -> Pred:
+        parts = [self._not()]
         while self._peek() == "and":
             self._take()
-            rhs = self._not()
-            val = val and rhs
-        return val
+            parts.append(self._not())
+        return parts[0] if len(parts) == 1 else (lambda ev: all(p(ev) for p in parts))
 
-    def _not(self) -> bool:
+    def _not(self) -> Pred:
         if self._peek() == "not":
             self._take()
-            return not self._not()
+            inner = self._not()
+            return lambda ev: not inner(ev)
         return self._atom()
 
-    def _atom(self) -> bool:
+    def _atom(self) -> Pred:
         tok = self._take()
         if tok == "(":
-            val = self._or()
+            inner = self._or()
             if self._peek() == ")":
                 self._take()
-            return val
+            return inner
         if tok in ("1 of", "all of"):
             pattern = self._take()
             names = list(self.sels) if pattern == "them" else [n for n in self.sels if fnmatch.fnmatchcase(n, pattern)]
-            results = [_selection_match(self.event, self.sels[n]) for n in names]
-            return any(results) if tok == "1 of" else bool(results) and all(results)
-        return _selection_match(self.event, self.sels.get(tok))
+            preds = [self.sels[n] for n in names]
+            if tok == "1 of":
+                return lambda ev: any(p(ev) for p in preds)
+            return lambda ev: bool(preds) and all(p(ev) for p in preds)
+        return self.sels.get(tok, lambda _ev: False)
+
+
+def compile_detection(detection: dict[str, Any]) -> Pred:
+    sels = {k: _compile_selection(v) for k, v in detection.items() if k != "condition"}
+    conditions = detection.get("condition", "")
+    conditions = [c for c in (conditions if isinstance(conditions, list) else [conditions]) if c]
+    preds = [_Parser(c, sels).parse() for c in conditions]
+    return lambda ev: any(p(ev) for p in preds)
 
 
 # ------------------------------------------------------------------ reglas
@@ -181,6 +245,7 @@ class SigmaRule:
     description: str = ""
     source: str = ""
     falsepositives: list[str] = field(default_factory=list)
+    _predicate: Pred | None = field(default=None, repr=False, compare=False)
 
     @property
     def attack(self) -> str:
@@ -198,14 +263,18 @@ class SigmaRule:
         svc = ls.get("service")
         return bool(svc) and svc.lower() == event_service(ev)
 
-    def matches(self, ev: Event) -> bool:
-        if not self.applies_to(ev):
-            return False
-        sels = {k: v for k, v in self.detection.items() if k != "condition"}
-        conditions = self.detection.get("condition", "")
-        conditions = conditions if isinstance(conditions, list) else [conditions]
-        event = normalize(ev)
-        return any(_Cond(c, sels, event).parse() for c in conditions if c)
+    @property
+    def predicate(self) -> Pred:
+        if self._predicate is None:
+            self._predicate = compile_detection(self.detection)
+        return self._predicate
+
+    def matches(self, ev: Event, prepared: _Event | None = None) -> bool:
+        if prepared is None:
+            if not self.applies_to(ev):
+                return False
+            prepared = _Event(normalize(ev))
+        return self.predicate(prepared)
 
 
 def load_rules(extra_dir: Path | None = None) -> tuple[list[SigmaRule], list[str]]:
@@ -266,11 +335,18 @@ def _subject(ev: dict[str, str]) -> tuple[str, str]:
 def scan_events(events: list[Event], rules: list[SigmaRule]) -> list[Finding]:
     """Aplica las reglas y agrupa coincidencias iguales (misma regla, imagen y línea de comandos)."""
     groups: dict[tuple[str, str, str], tuple[Finding, int]] = {}
+    applicable: dict[tuple[str, int], list[SigmaRule]] = {}  # (registro, id) → reglas que aplican
     for ev in events:
-        for rule in rules:
-            if not rule.matches(ev):
+        sig = (ev.log, ev.event_id)
+        if sig not in applicable:
+            applicable[sig] = [r for r in rules if r.applies_to(ev)]
+        if not applicable[sig]:
+            continue
+        data = normalize(ev)
+        prepared = _Event(data)
+        for rule in applicable[sig]:
+            if not rule.matches(ev, prepared):
                 continue
-            data = normalize(ev)
             path, cmd = _subject(data)
             key = (rule.id, path.lower(), cmd.lower())
             if key in groups:

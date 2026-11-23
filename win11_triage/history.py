@@ -50,35 +50,48 @@ def key_of(f: Finding) -> str:
     return f.key
 
 
-def list_reports(folder: Path, limit: int = 200) -> list[HistoryEntry]:
-    entries = []
-    if not folder.is_dir():
-        return entries
-    for p in sorted(folder.glob("triage_*.json"), reverse=True)[:limit]:
-        try:
-            d = json.loads(p.read_text(encoding="utf-8"))
-            entries.append(
-                HistoryEntry(
-                    path=p,
-                    started=datetime.fromisoformat(d["started"]),
-                    host=d.get("host", "?"),
-                    dry_run=bool(d.get("dry_run")),
-                    summary=dict(d.get("summary", {})),
-                    max_score=int(d.get("max_score", 0)),
-                    keys=frozenset(
-                        finding_key(
-                            x.get("source", ""),
-                            x.get("path", ""),
-                            x.get("sha256", ""),
-                            x.get("name", ""),
-                            _rule_or_name(x),
-                        )
-                        for x in d.get("findings", [])
-                    ),
+_CACHE: dict[Path, tuple[tuple[int, int], HistoryEntry | None]] = {}
+
+
+def _entry(p: Path) -> HistoryEntry | None:
+    """Lee un informe; se recuerda mientras no cambien su tamaño ni su fecha (el historial se
+    refresca tras cada análisis y releer cientos de JSON grandes cada vez era lo más lento)."""
+    try:
+        st = p.stat()
+    except OSError:
+        return None
+    sig = (st.st_size, st.st_mtime_ns)
+    hit = _CACHE.get(p)
+    if hit and hit[0] == sig:
+        return hit[1]
+    entry = None
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        entry = HistoryEntry(
+            path=p,
+            started=datetime.fromisoformat(d["started"]),
+            host=d.get("host", "?"),
+            dry_run=bool(d.get("dry_run")),
+            summary=dict(d.get("summary", {})),
+            max_score=int(d.get("max_score", 0)),
+            keys=frozenset(
+                finding_key(
+                    x.get("source", ""), x.get("path", ""), x.get("sha256", ""), x.get("name", ""), _rule_or_name(x)
                 )
-            )
-        except (OSError, ValueError, KeyError, TypeError):
-            continue  # informe corrupto o de otra herramienta: se ignora
+                for x in d.get("findings", [])
+            ),
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        entry = None  # informe corrupto o de otra herramienta: se ignora
+    _CACHE[p] = (sig, entry)
+    return entry
+
+
+def list_reports(folder: Path, limit: int = 200) -> list[HistoryEntry]:
+    if not folder.is_dir():
+        return []
+    paths = sorted(folder.glob("triage_*.json"), reverse=True)[:limit]
+    entries = [e for e in map(_entry, paths) if e is not None]
     return sorted(entries, key=lambda e: e.started, reverse=True)
 
 

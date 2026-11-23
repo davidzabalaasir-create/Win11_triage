@@ -10,17 +10,29 @@ from __future__ import annotations
 
 import getpass
 import json
+import logging
 import os
 import platform
 import sys
 import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import collectors, collectors_browsers, collectors_events, collectors_live, env_check, intel, remote, sigma
+from . import (
+    collectors,
+    collectors_browsers,
+    collectors_events,
+    collectors_live,
+    env_check,
+    hashing,
+    intel,
+    remote,
+    sigma,
+)
 from .enrich import eligible, file_of, pe_static, yara_scan
 from .models import Cancelled, Finding, Signal
 from .report import TriageResult
@@ -28,6 +40,7 @@ from .rules import apply_rules, apply_vt
 from .virustotal import FREE_TIER_INTERVAL, VTAuthError, VTClient, VTResult
 from .whitelist import Whitelist
 
+log = logging.getLogger(__name__)
 SAMPLES = Path(__file__).resolve().parent / "samples"
 PLACEHOLDER_KEY = "pon_aqui_tu_api_key"
 
@@ -37,6 +50,7 @@ SECTION_PROCESSES = "Procesos en ejecución — sospechosos"
 SECTION_EVENTS = "Eventos de Windows — servicios, tareas y Defender"
 SECTION_SIGMA = "Reglas Sigma — Sysmon, 4688, PowerShell"
 SECTION_BROWSERS = "Extensiones de navegador"
+MAX_PARALLEL = 4  # colectores a la vez (procesos externos + disco)
 REMOTE_MODULES = {"autoruns", "processes"}  # el resto necesita herramientas o ficheros locales
 
 
@@ -131,6 +145,38 @@ class Reporter:
     def vt_wait(self, remaining: float) -> None: ...
 
 
+class _ParallelReporter(Reporter):
+    """Envuelve el reporter mientras los colectores corren a la vez: serializa las llamadas y
+    muestra «(n de m terminados)» en vez de que cada módulo apague el indicador del otro."""
+
+    def __init__(self, inner: Reporter, total: int) -> None:
+        self.inner, self.total, self.count = inner, total, 0
+        self.lock = threading.Lock()
+
+    def finished(self) -> None:
+        with self.lock:
+            self.count += 1
+
+    def stage(self, text: str) -> None:
+        with self.lock:
+            self.inner.stage(f"{text}  ({self.count}/{self.total} módulos terminados)")
+
+    def done(self) -> None:  # lo apaga el motor cuando terminan todos
+        pass
+
+    def info(self, text: str) -> None:
+        with self.lock:
+            self.inner.info(text)
+
+    def warn(self, text: str) -> None:
+        with self.lock:
+            self.inner.warn(text)
+
+    def error(self, text: str) -> None:
+        with self.lock:
+            self.inner.error(text)
+
+
 # ----------------------------------------------------------------- dry-run
 def sample_text(name: str) -> str:
     return (SAMPLES / name).read_text(encoding="utf-8")
@@ -176,6 +222,18 @@ class TriageEngine:
 
     def run(self) -> TriageResult:
         """Ejecuta los módulos activos. Puede lanzar WhitelistError o Cancelled."""
+        cache_file = None if self.opts.dry_run else self.opts.config_dir / "hash_cache.json"  # type: ignore[operator]
+        cache = hashing.HashCache(cache_file)
+        previous = hashing.use(cache)
+        try:
+            return self._run()
+        finally:
+            cache.save()
+            hashing.use(previous)
+            if cache.hits or cache.misses:
+                log.debug("Caché de hashes: %d aciertos, %d calculados", cache.hits, cache.misses)
+
+    def _run(self) -> TriageResult:
         whitelist = Whitelist.load(self.opts.whitelist_file, create=not self.opts.dry_run)
         started = datetime.now()
         if self.opts.remote_host:
@@ -199,21 +257,17 @@ class TriageEngine:
             ("sigma", self.opts.sigma, SECTION_SIGMA, self._sigma),
             ("browsers", self.opts.browsers, SECTION_BROWSERS, self._browsers),
         )
+        jobs = []
         for module, enabled, section, fn in plan:
             if not enabled:
                 continue
             if rem and module not in REMOTE_MODULES:
                 self.r.warn(f"Módulo «{module}» no disponible en remoto: se omite.")
                 continue
-            self._check_cancel()
             res.modules.append(module)
-            try:
-                found = fn(res)
-            except collectors.CollectorError as e:
-                self._fail(res, str(e))
-                found = []
-            finally:
-                self.r.done()
+            jobs.append((section, fn))
+        self._check_cancel()
+        for section, found in self._run_collectors(res, jobs):
             found, skipped = whitelist.filter(found)
             res.whitelisted += skipped
             res.sections[section] = found
@@ -244,6 +298,42 @@ class TriageEngine:
             self._record_process_tree(res)
         res.finished = datetime.now()
         return res
+
+    def _run_collectors(
+        self, res: TriageResult, jobs: list[tuple[str, Callable[[TriageResult], list[Finding]]]]
+    ) -> list[tuple[str, list[Finding]]]:
+        """Ejecuta los colectores a la vez: autorunsc, sigcheck, wevtutil y la lectura de perfiles
+        pasan casi todo el tiempo esperando a procesos externos o al disco, así que en paralelo el
+        análisis dura lo que el más lento y no la suma de todos. El orden de las secciones se mantiene."""
+
+        def one(fn: Callable[[TriageResult], list[Finding]]) -> list[Finding]:
+            self._check_cancel()
+            try:
+                return fn(res)
+            except collectors.CollectorError as e:
+                self._fail(res, str(e))
+                return []
+
+        if len(jobs) <= 1:
+            out = []
+            for section, fn in jobs:
+                self._check_cancel()
+                out.append((section, one(fn)))
+                self.r.done()
+            return out
+        real, self.r = self.r, _ParallelReporter(self.r, len(jobs))
+        try:
+            with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL, len(jobs)), thread_name_prefix="colector") as pool:
+                futures = [(section, pool.submit(one, fn)) for section, fn in jobs]
+                results = []
+                for section, fut in futures:
+                    results.append((section, fut.result()))
+                    self.r.finished()  # type: ignore[attr-defined]
+        finally:
+            self.r = real
+            real.done()
+        self._check_cancel()
+        return results
 
     def _fail(self, res: TriageResult, msg: str) -> None:
         res.errors.append(msg)
@@ -434,23 +524,30 @@ class TriageEngine:
                 self._fail(res, f"YARA: no se pudieron compilar las reglas ({e})")
         else:
             self.r.warn('YARA no disponible (pip install "win11-triage[yara]"): solo análisis PE.')
-        seen: dict[Path, list[Signal]] = {}
-        analysed = 0
-        for i, f in enumerate(targets, 1):
+        files = {f.key: file_of(f) for f in targets}
+        unique = list(dict.fromkeys(p for p in files.values() if p is not None))
+        done = 0
+        lock = threading.Lock()
+
+        def analyse(path: Path) -> list[Signal]:
+            nonlocal done
             self._check_cancel()
-            path = file_of(f)
-            if path is None:
-                continue
-            if path not in seen:
-                self.r.stage(f"Analizando contenido {i}/{len(targets)}: {path.name}")
-                sigs = pe_static.pe_signals(path)
-                if scanner is not None:
-                    sigs += scanner.scan(path)
-                seen[path] = sigs
-                analysed += 1
-            f.signals += seen[path]
+            sigs = pe_static.pe_signals(path)
+            if scanner is not None:
+                sigs += scanner.scan(path)  # YARA libera el GIL: aquí el paralelo rinde de verdad
+            with lock:
+                done += 1
+                self.r.stage(f"Analizando contenido {done}/{len(unique)}: {path.name}")
+            return sigs
+
+        with ThreadPoolExecutor(max_workers=MAX_PARALLEL, thread_name_prefix="contenido") as pool:
+            seen = dict(zip(unique, pool.map(analyse, unique), strict=True))
+        for f in targets:
+            path = files[f.key]
+            if path is not None:
+                f.signals += seen[path]
         self.r.done()
-        self.r.info(f"Contenido: {analysed} fichero(s) analizados (PE{' + YARA' if scanner else ''}).")
+        self.r.info(f"Contenido: {len(unique)} fichero(s) analizados (PE{' + YARA' if scanner else ''}).")
 
     # --------------------------------------------------------- reputación
     def _intel(self, res: TriageResult) -> None:

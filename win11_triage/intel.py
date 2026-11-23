@@ -11,7 +11,9 @@ import ipaddress
 import json
 import logging
 import re
+import threading
 from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -174,6 +176,17 @@ def hash_signal(info: dict[str, Any]) -> Signal | None:
     return Signal("INTEL_MB_KNOWN", "Hash conocido en MalwareBazaar", 80, "", evidence)
 
 
+def _from_cache(
+    kind: str, key: str, ttl: timedelta, cache: IntelCache, out: dict[str, dict[str, Any]], stats: dict[str, int]
+) -> bool:
+    hit = cache.get(kind, key, ttl)
+    if hit is None:
+        return False
+    out[key] = hit
+    stats["cache"] += 1
+    return True
+
+
 def enrich(
     findings: Iterable[Finding],
     ip_lookup: Lookup | None,
@@ -187,6 +200,8 @@ def enrich(
     ip_results: dict[str, dict[str, Any]] = {}
     hash_results: dict[str, dict[str, Any]] = {}
 
+    lock = threading.Lock()
+
     def resolve(kind: str, key: str, ttl: timedelta, fn: Lookup | None, out: dict[str, dict[str, Any]]) -> None:
         nonlocal ip_lookup, hash_lookup
         if key in out or fn is None:
@@ -197,8 +212,10 @@ def enrich(
             out[key] = hit
             return
         try:
-            out[key] = cache.put(kind, key, fn(key))
-            stats["network"] += 1
+            value = fn(key)
+            with lock:
+                out[key] = cache.put(kind, key, value)
+                stats["network"] += 1
         except PermissionError as e:
             on_warn(f"{e}: se omite el resto de consultas de ese servicio.")
             if kind == "ip":
@@ -209,11 +226,18 @@ def enrich(
             on_warn(f"Reputación de {key} no disponible: {e}")
 
     ips = sorted({ip for f in findings for ip in finding_ips(f)})[:MAX_IPS]
-    for ip in ips:
-        resolve("ip", ip, IP_TTL, ip_lookup, ip_results)
     hashes = sorted({f.sha256.lower() for f in findings if len(f.sha256 or "") == 64})[:MAX_HASHES]
-    for h in hashes:
-        resolve("hash", h, HASH_TTL, hash_lookup, hash_results)
+    # Primero lo que está en caché (instantáneo); lo demás, 4 consultas a la vez.
+    ips_todo = [ip for ip in ips if not _from_cache("ip", ip, IP_TTL, cache, ip_results, stats)]
+    hashes_todo = [h for h in hashes if not _from_cache("hash", h, HASH_TTL, cache, hash_results, stats)]
+    # La primera consulta de cada servicio va sola: si la clave es mala no se lanzan las demás.
+    if ips_todo:
+        resolve("ip", ips_todo[0], IP_TTL, ip_lookup, ip_results)
+    if hashes_todo:
+        resolve("hash", hashes_todo[0], HASH_TTL, hash_lookup, hash_results)
+    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="intel") as pool:
+        list(pool.map(lambda ip: resolve("ip", ip, IP_TTL, ip_lookup, ip_results), ips_todo[1:]))
+        list(pool.map(lambda h: resolve("hash", h, HASH_TTL, hash_lookup, hash_results), hashes_todo[1:]))
     cache.save()
 
     stats["ips"], stats["hashes"] = len(ip_results), len(hash_results)
