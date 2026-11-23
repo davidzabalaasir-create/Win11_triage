@@ -1,0 +1,18 @@
+title: Ejecución desde carpetas temporales o públicas
+title_en: Execution from temporary or public folders
+id: w11t-exec-user-dirs
+status: stable
+description: Un ejecutable arranca desde Temp, Downloads, Public o AppData\Roaming lanzado por un intérprete o el navegador.
+author: David
+tags: [attack.execution, attack.t1204.002]
+logsource: {product: windows, category: process_creation}
+detection:
+  path:
+    Image|contains: ['\appdata\local\temp\', '\users\public\', '\downloads\', '\appdata\roaming\']
+  parent:
+    ParentImage|endswith: ['\cmd.exe', '\powershell.exe', '\wscript.exe', '\cscript.exe', '\mshta.exe', '\explorer.exe', '\chrome.exe', '\msedge.exe', '\firefox.exe']
+  filter_updaters:
+    Image|contains: ['\squirrel', 'update.exe', '\teams\']
+  condition: path and parent and not filter_updaters
+falsepositives: [Instaladores descargados por el usuario]
+level: medium

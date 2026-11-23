@@ -2,6 +2,53 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y [SemVer](https://semver.org/lang/es/).
 
+## [3.0.0] — 2026-11-23
+
+### Añadido
+- **Árbol de procesos**: página «Procesos» con las ramas sospechosas desplegadas y cadenas padre → hijo en los informes.
+- **Reglas Sigma** (`--sigma`): motor propio compatible con el formato estándar sobre Sysmon (1, 3, 11, 12–14, 22), Security 4688, PowerShell 4104 y System 7045. 11 reglas incluidas y reglas propias en `sigma/*.yml`.
+- **Extensiones de navegador** (`--browsers`): Chrome, Edge, Brave y Firefox; fuera de la tienda, sin empaquetar, sin firma y permisos peligrosos.
+- **Reputación** (`--intel`): AbuseIPDB para IPs remotas y MalwareBazaar para hashes, con caché.
+- **Alertas**: notificación de Windows (`--notify`), webhooks para Slack, Teams, Splunk HEC o JSON genérico (`--webhook`), JSON Lines para Wazuh/Filebeat (`--jsonl`) y `--alert-new` para avisar solo de lo nuevo o lo que empeora. También en Ajustes.
+- **Análisis programado** (`--schedule daily|weekly`) con el Programador de tareas; en la GUI, en Ajustes.
+- **«¿Qué hago con esto?»**: pasos recomendados para cada hallazgo en la GUI, los informes y la CLI (`--explain`).
+- **Resumen ejecutivo en PDF** de una página (`--format pdf` y Exportar).
+- **Triaje remoto por WinRM** (`--remote`), sin instalar nada en el equipo analizado; también en «Nuevo análisis».
+- **Inglés**: interfaz, informes, PDF y recomendaciones (`--lang en` o Ajustes → Idioma).
+- **Paquete MSIX** para Microsoft Store (`scripts/build_msix.ps1`) y guía de publicación en `docs/MICROSOFT_STORE.md`.
+- **Página web** del proyecto en GitHub Pages (`site/`).
+- **Asistente de IA**: página «Asistente» y `--ask "pregunta"` (también sobre informes guardados con `--report`).
+  - Usa Groq (gratuito) u Ollama (local).
+  - Consulta los datos del análisis con herramientas de solo lectura.
+  - Anonimiza el usuario y el nombre del equipo.
+
+### Corregido
+- Los avisos flotantes ocupaban 200 px de alto.
+
+## [2.1.0] — 2026-11-23
+
+### Añadido
+- **Revisión del analista**:
+  - estados Pendiente, En revisión, Falso positivo y Confirmado, con notas;
+  - atajos `P` `R` `F` `C`, filtro y progreso «Revisados X/Y»;
+  - persistente entre sesiones (`review.json`) e incluida en los informes, el JSON y el CSV.
+- **Comparar análisis** desde el Historial: nuevos, resueltos, empeoran y mejoran.
+- **Paquete de evidencias** `.zip`: informes, CSV, revisiones, IoC SHA-256, LEEME y SHA256SUMS. Desde la GUI o con `--evidence`.
+- **Cronología** en los informes HTML y Markdown.
+- CLI: `--min-score`, `--fail-on-score` y `--check-update`.
+- **Buscar actualizaciones** en Ajustes (consulta manual a GitHub Releases).
+
+### Cambiado
+- **Rediseño completo de la interfaz**:
+  - sistema de diseño con tokens de color (claro y oscuro), escala tipográfica (Segoe UI Variable, Cascadia Mono para rutas y hashes), rejilla de 4 px e iconos Segoe Fluent con alternativa Unicode;
+  - barra lateral de navegación (Inicio, Hallazgos, Red, Historial, Ajustes) en lugar de la barra lateral saturada;
+  - diálogo **Nuevo análisis** con perfiles y módulos agrupados;
+  - **panel de detalle lateral** con el porqué de cada señal;
+  - tabla con punto de estado (sin colorear filas enteras), chips de filtro con contador y rutas abreviadas por el centro;
+  - KPIs con tendencia, estado vacío con acceso a la demostración, barra de estado con el entorno y registro plegable;
+  - **tema claro, oscuro o del sistema**.
+- **Microinteracciones**: «Deshacer» al ignorar elementos, confirmación en el botón al copiar, avisos con acción y el botón Analizar que se convierte en Cancelar.
+
 ## [2.0.0] — 2026-11-22
 
 ### Añadido

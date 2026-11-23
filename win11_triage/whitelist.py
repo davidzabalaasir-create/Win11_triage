@@ -84,3 +84,18 @@ def add_to_whitelist(file: Path, *, path: str = "", sha256: str = "") -> bool:
     data[key].append(value)
     file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     return True
+
+
+def remove_from_whitelist(file: Path, *, path: str = "", sha256: str = "") -> bool:
+    """Deshace ``add_to_whitelist``. Devuelve False si no estaba."""
+    if not file.exists():
+        return False
+    data = json.loads(file.read_text(encoding="utf-8") or "{}")
+    key, value = ("paths", path.strip()) if path else ("hashes", sha256.strip().lower())
+    items = data.get(key, [])
+    kept = [v for v in items if v.lower() != value.lower()]
+    if len(kept) == len(items):
+        return False
+    data[key] = kept
+    file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    return True

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
+import os
 import sys
 from pathlib import Path
 
+import requests
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.logging import RichHandler
@@ -15,8 +18,11 @@ from rich.status import Status as RichStatus
 
 from . import __copyright__, __version__, env_check, report
 from .engine import Reporter, TriageEngine, TriageOptions
+from .i18n import set_language, t
 from .models import Cancelled, Finding, Status
+from .remote import RemoteError
 from .report import TriageResult
+from .review import ReviewStore
 from .virustotal import VTResult
 from .whitelist import WhitelistError
 
@@ -48,11 +54,24 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="DÍAS",
         help="eventos 7045/4698 y detecciones de Defender de los últimos DÍAS (por defecto 7)",
     )
+    mod.add_argument(
+        "--sigma",
+        action="store_true",
+        help="aplica reglas Sigma a Sysmon, 4688, PowerShell 4104 y 7045 (usa los días de --events)",
+    )
+    mod.add_argument(
+        "--browsers", action="store_true", help="extensiones de Chrome, Edge, Brave y Firefox (permisos y origen)"
+    )
     mod.add_argument("--network", action="store_true", help="conexiones activas por PID (psutil; tcpvcon de respaldo)")
     mod.add_argument(
         "--static", action="store_true", help="análisis de contenido: PE (pefile) y YARA si está instalado"
     )
     mod.add_argument("--vt", action="store_true", help="consulta los SHA-256 en VirusTotal (requiere VT_API_KEY)")
+    mod.add_argument(
+        "--intel",
+        action="store_true",
+        help="reputación de IPs (AbuseIPDB) y hashes (MalwareBazaar); claves en .env",
+    )
     mod.add_argument("--all", action="store_true", help="activa todos los módulos")
 
     opt = p.add_argument_group("opciones")
@@ -74,9 +93,63 @@ def build_parser() -> argparse.ArgumentParser:
         "--format",
         choices=report.FORMAT_CHOICES,
         default="md",
-        help="formato del informe: md, html, json, both (md+json) o all (por defecto: md)",
+        help="formato del informe: md, html, json, pdf (resumen ejecutivo), both (md+json) o all (todo; por defecto: md)",
     )
     opt.add_argument("--no-report", action="store_true", help="no exportar informe")
+    opt.add_argument(
+        "--evidence",
+        action="store_true",
+        help="genera además un paquete de evidencias .zip (informes, CSV, IoC, SHA256SUMS)",
+    )
+    opt.add_argument("--min-score", type=int, metavar="N", help="muestra e informa solo los elementos con score ≥ N")
+    opt.add_argument(
+        "--fail-on-score",
+        type=int,
+        metavar="N",
+        help="código de salida 2 si algún elemento tiene score ≥ N (además de las detecciones de VT)",
+    )
+    rm = p.add_argument_group("triaje remoto (WinRM)")
+    rm.add_argument(
+        "--remote",
+        metavar="EQUIPO",
+        help="analiza otro equipo por WinRM (persistencia, procesos y red) sin instalar nada en él",
+    )
+    rm.add_argument("--remote-user", metavar="DOMINIO\\USUARIO", help="cuenta remota (Windows pide la contraseña)")
+    rm.add_argument("--remote-ssl", action="store_true", help="usa WinRM sobre HTTPS (puerto 5986)")
+
+    al = p.add_argument_group("alertas e integraciones")
+    al.add_argument("--notify", action="store_true", help="notificación de Windows al terminar")
+    al.add_argument(
+        "--webhook",
+        metavar="URL",
+        default=None,
+        help="envía el resumen a Slack, Teams, Splunk HEC o JSON genérico (por defecto: WIN11_TRIAGE_WEBHOOK)",
+    )
+    al.add_argument("--jsonl", type=Path, metavar="FICHERO", help="añade los hallazgos en JSON Lines (Wazuh, Filebeat)")
+    al.add_argument(
+        "--alert-new",
+        action="store_true",
+        help="alerta solo de lo nuevo o lo que empeora respecto al análisis anterior",
+    )
+    al.add_argument(
+        "--schedule",
+        choices=("daily", "weekly", "off", "status"),
+        help="programa un análisis diario o semanal con alertas de novedades (off: lo quita)",
+    )
+    al.add_argument("--at", default="09:00", metavar="HH:MM", help="hora del análisis programado (por defecto 09:00)")
+    opt.add_argument(
+        "--explain", action="store_true", help="«¿Qué hago con esto?»: pasos recomendados para los 5 más graves"
+    )
+    ai = p.add_argument_group("asistente de IA (Groq gratis u Ollama local)")
+    ai.add_argument("--ask", metavar="PREGUNTA", help="pregunta al asistente sobre el análisis (GROQ_API_KEY en .env)")
+    ai.add_argument("--report", type=Path, metavar="JSON", help="usa un informe JSON existente en vez de analizar")
+    opt.add_argument("--check-update", action="store_true", help="comprueba si hay una versión nueva y sale")
+    opt.add_argument(
+        "--lang",
+        choices=("es", "en"),
+        default=None,
+        help="idioma de los informes y mensajes: es (por defecto) o en; también WIN11_TRIAGE_LANG",
+    )
     opt.add_argument("--no-color", action="store_true", help="desactiva los colores")
     opt.add_argument(
         "-v", "--verbose", action="store_true", help="muestra comandos ejecutados y detalles de depuración"
@@ -90,23 +163,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     a = p.parse_args(argv)
     if a.vt_limit is not None and a.vt_limit < 0:
         p.error("--vt-limit debe ser >= 0")
-    modules = ("autoruns", "scan_user", "processes", "network", "static", "vt")
+    modules = ("autoruns", "scan_user", "processes", "sigma", "browsers", "network", "static", "vt", "intel")
     if a.all or (a.dry_run and not any(getattr(a, m) for m in modules) and a.events is None):
         for m in modules:
             setattr(a, m, True)
         a.events = a.events or 7
+    if a.remote and not (a.all or any(getattr(a, m) for m in modules) or a.events is not None):
+        a.autoruns = a.processes = a.network = True  # lo que se puede recoger en remoto
     a.options = TriageOptions(
         autoruns=a.autoruns,
         scan_user=a.scan_user,
         processes=a.processes,
         events=a.events is not None,
+        sigma=a.sigma,
+        browsers=a.browsers,
         event_days=a.events or 7,
         static=a.static,
         network=a.network,
         vt=a.vt,
+        intel=a.intel,
         dry_run=a.dry_run,
         vt_limit=a.vt_limit,
         config_dir=a.config_dir,
+        remote_host=a.remote,
+        remote_user=a.remote_user,
+        remote_ssl=a.remote_ssl,
     )
     a.config_dir = a.options.config_dir
     a.output_dir = a.output_dir or a.config_dir / "reportes"
@@ -226,11 +307,13 @@ def run(args: argparse.Namespace) -> int:
 
     tools = env_check.check_all()
     needed = {n for n, on in (("autorunsc.exe", opts.autoruns), ("sigcheck.exe", opts.scan_user)) if on}
+    if opts.remote_host:
+        needed = set()  # en remoto se usa PowerShell, no Sysinternals
     env_ok = show_env(tools, needed, hints=not opts.dry_run)
 
     if not opts.any_collector:
         console.print(
-            "\nElige módulos: [bold]--autoruns --scan-user --processes --events --network --static --vt[/] "
+            "\nElige módulos: [bold]--autoruns --scan-user --processes --events --sigma --browsers --network --static --vt --intel[/] "
             "o [bold]--all[/]. También: [bold]--gui[/] (ayuda: --help)."
         )
         return EXIT_OK if env_ok else EXIT_ENV
@@ -241,20 +324,160 @@ def run(args: argparse.Namespace) -> int:
     reporter = RichReporter()
     try:
         res = TriageEngine(opts, tools, reporter).run()
-    except WhitelistError as e:
+    except (WhitelistError, RemoteError) as e:
         console.print(f"[red]{e}[/]")
         return EXIT_ENV
     finally:
         reporter.done()
 
+    if args.min_score is not None:
+        hidden = sum(1 for f in res.findings if f.score < args.min_score)
+        res.sections = {t: [f for f in fs if f.score >= args.min_score] for t, fs in res.sections.items()}
+        console.print(f"[dim]--min-score {args.min_score}: {hidden} elemento(s) por debajo ocultos.[/]")
+
+    review_store = ReviewStore(opts.config_dir)  # type: ignore[arg-type]
+    res.reviews = review_store.data
     print_results(res)
     if not args.no_report:
         for path in report.write_reports(res, args.output_dir, args.format):
             console.print(f"[bold]Informe:[/] {path}")
+    if args.evidence:
+        zip_path = report.write_evidence_zip(res, args.output_dir / f"{res.file_stem}_evidencias.zip")
+        console.print(f"[bold]Paquete de evidencias:[/] {zip_path}")
+
+    if args.explain:
+        print_explain(res)
+    send_alerts(args, res)
+    if args.ask:
+        ask_agent(res, args.ask)
 
     if opts.dry_run:
         return EXIT_OK  # el dry-run solo valida la estructura
-    return EXIT_DETECTED if res.counts()[Status.DETECTED] else EXIT_OK
+    over = args.fail_on_score is not None and any(f.score >= args.fail_on_score for f in res.findings)
+    return EXIT_DETECTED if (res.counts()[Status.DETECTED] or over) else EXIT_OK
+
+
+def print_explain(res: TriageResult) -> None:
+    from . import playbook
+
+    top = [f for f in report.sort_findings(res.findings) if f.status != Status.CLEAN][:5]
+    for f in top:
+        adv = playbook.advice_for(f)
+        steps = "\n".join(f"  {i}. {s}" for i, s in enumerate(adv.steps, 1))
+        console.print(
+            Panel(
+                f"[bold]{adv.summary}[/]\n{steps}",
+                title=f"{t('¿Qué hago con esto?')} · {f.name} (score {f.score})",
+                title_align="left",
+                border_style="red" if f.status == Status.DETECTED else "yellow",
+            )
+        )
+
+
+def ask_agent(res: TriageResult, question: str) -> int:
+    from .agent import Agent, AgentError
+
+    agent = Agent(res)
+    console.rule(f"[bold magenta]{t('Asistente de IA')}[/] [dim]({agent.config.provider} · {agent.config.model})[/]")
+    try:
+        with console.status(t("Pensando…")):
+            answer = agent.ask(question, on_tool=lambda n: console.print(f"[dim]  · {n}[/]"))
+    except AgentError as e:
+        console.print(f"[red]{e}[/]")
+        return EXIT_ENV
+    from rich.markdown import Markdown
+
+    console.print(Markdown(answer))
+    return EXIT_OK
+
+
+def ask_report(args: argparse.Namespace) -> int:
+    """--report FICHERO [--ask PREGUNTA]: carga un análisis guardado; sin --ask lo resume."""
+    load_dotenv(args.config_dir / ".env")
+    try:
+        res = report.load_json(args.report)
+    except (OSError, ValueError, KeyError) as e:
+        console.print(f"[red]No se pudo leer {args.report}: {e}[/]")
+        return EXIT_ENV
+    res.reviews = ReviewStore(args.config_dir).data
+    if not args.ask:
+        print_results(res)
+        return EXIT_OK
+    return ask_agent(res, args.ask)
+
+
+def send_alerts(args: argparse.Namespace, res: TriageResult) -> None:
+    """--notify, --webhook y --jsonl; con --alert-new solo lo nuevo o lo que empeora."""
+    webhook = args.webhook or os.environ.get("WIN11_TRIAGE_WEBHOOK", "").strip()
+    if not (args.notify or webhook or args.jsonl):
+        return
+    from . import alerts, history
+
+    previous = None
+    if args.alert_new:
+        current = args.output_dir / f"{res.file_stem}.json"
+        prev = history.previous_of(history.list_reports(args.output_dir), current, res.started, res.dry_run)
+        if prev is not None:
+            with contextlib.suppress(OSError, ValueError, KeyError):
+                previous = report.load_json(prev.path)
+        if previous is None:
+            console.print("[dim]--alert-new: no hay análisis anterior; se alerta de todo lo relevante.[/]")
+    items = alerts.select_alertable(res, previous, only_new=args.alert_new and previous is not None)
+    if args.jsonl:
+        n = alerts.write_jsonl(args.jsonl, res, items)
+        console.print(f"[bold]JSONL:[/] {n} evento(s) añadidos a {args.jsonl}")
+    if not items and args.alert_new:
+        console.print("[green]Sin novedades: no se envían alertas.[/]")
+        return
+    title, body = alerts.summary_text(res, items, args.alert_new)
+    if args.notify and not alerts.notify_toast(f"win11-triage · {title}", body):
+        console.print("[dim]Notificación de Windows no disponible en este sistema.[/]")
+    if webhook:
+        if res.dry_run:
+            console.print(f"[dim]Dry-run: no se envía el webhook ({alerts.webhook_kind(webhook)}).[/]")
+            return
+        try:
+            kind = alerts.send_webhook(webhook, res, items, args.alert_new)
+            console.print(f"[bold]Webhook:[/] enviado ({kind}, {len(items)} elemento(s)).")
+        except requests.RequestException as e:
+            console.print(f"[yellow]No se pudo enviar el webhook: {e}[/]")
+
+
+def schedule(args: argparse.Namespace) -> int:
+    from . import scheduler
+
+    try:
+        if args.schedule == "status":
+            console.print(scheduler.status())
+        elif args.schedule == "off":
+            scheduler.delete()
+            console.print("Análisis programado eliminado.")
+        else:
+            script = scheduler.create(args.config_dir, args.schedule, args.at, admin=env_check.is_admin())
+            when = "cada día" if args.schedule == "daily" else "cada lunes"
+            console.print(f"[green]Programado {when} a las {args.at}.[/] Script: {script}")
+            console.print("[dim]Solo avisará si hay hallazgos nuevos o que empeoran (--alert-new).[/]")
+    except (RuntimeError, OSError, ValueError) as e:
+        console.print(f"[red]No se pudo programar: {e}[/]")
+        return EXIT_ENV
+    return EXIT_OK
+
+
+def check_update() -> int:
+    import requests
+
+    from .updates import check_latest
+
+    try:
+        info = check_latest()
+    except requests.RequestException as e:
+        console.print(f"[yellow]No se pudo comprobar: {e}[/]")
+        return EXIT_ENV
+    if info.available:
+        console.print(f"[green]Hay una versión nueva: {info.latest}[/] (tienes {info.current}) → {info.url}")
+    else:
+        console.print(f"Tienes la última versión ({info.current}).")
+    return EXIT_OK
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -264,6 +487,14 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
     args = parse_args(argv)
+    if args.lang:
+        set_language(args.lang)
+    if args.check_update:
+        return check_update()
+    if args.schedule:
+        return schedule(args)
+    if args.report:
+        return ask_report(args)
     if args.gui:
         from .gui import main as gui_main
 

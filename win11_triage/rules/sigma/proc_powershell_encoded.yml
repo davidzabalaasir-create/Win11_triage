@@ -1,0 +1,20 @@
+title: PowerShell con comando codificado u oculto
+title_en: PowerShell with an encoded or hidden command
+id: w11t-ps-encoded
+status: stable
+description: PowerShell lanzado con -EncodedCommand, ventana oculta o descarga en memoria.
+author: David
+tags: [attack.execution, attack.t1059.001, attack.defense_evasion, attack.t1027]
+logsource: {product: windows, category: process_creation}
+detection:
+  img:
+    Image|endswith: ['\powershell.exe', '\pwsh.exe']
+  encoded:
+    CommandLine|re: '\s-(e|en|enc|enco|encod|encode|encoded|encodedc|encodedcommand)\s+[A-Za-z0-9+/=]{20,}'
+  hidden:
+    CommandLine|contains|all: ['-w', 'hidden']
+  cradle:
+    CommandLine|contains: ['downloadstring', 'downloaddata', 'invoke-webrequest', 'iwr ', 'net.webclient', 'frombase64string']
+  condition: img and (encoded or hidden or cradle)
+falsepositives: [Herramientas de gestión que usan -EncodedCommand]
+level: high

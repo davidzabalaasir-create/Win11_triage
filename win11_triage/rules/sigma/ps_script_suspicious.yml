@@ -1,0 +1,15 @@
+title: Script de PowerShell con técnicas ofensivas
+title_en: PowerShell script with offensive techniques
+id: w11t-ps-scriptblock
+status: stable
+description: Script Block Logging (4104) con evasión de AMSI, Mimikatz o inyección de código.
+author: David
+tags: [attack.execution, attack.t1059.001, attack.defense_evasion, attack.t1562.001]
+logsource: {product: windows, category: ps_script}
+detection:
+  amsi:
+    ScriptBlockText|contains: ['amsiutils', 'amsiinitfailed', 'amsiscanbuffer']
+  offensive:
+    ScriptBlockText|contains: ['invoke-mimikatz', 'sekurlsa', 'invoke-shellcode', 'virtualalloc', 'reflection.assembly]::load']
+  condition: amsi or offensive
+level: high

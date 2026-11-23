@@ -62,7 +62,7 @@ class Connection:
 
 @dataclass
 class Finding:
-    source: str  # "autoruns" | "sigcheck" | "process" | "event"
+    source: str  # "autoruns" | "sigcheck" | "process" | "event" | "sigma" | "browser"
     name: str
     path: str
     publisher: str
@@ -105,6 +105,15 @@ class Finding:
     @property
     def attack(self) -> list[str]:
         return sorted({t.strip() for s in self.unique_signals for t in s.attack.split(",") if t.strip()})
+
+    @property
+    def key(self) -> str:
+        """Identidad estable entre ejecuciones (historial, comparación y revisiones)."""
+        ident = (self.path or self.name).strip().strip('"').lower()
+        if self.source == "sigma":  # varias reglas en el mismo binario; el id no depende del idioma
+            rule = next((s.id for s in self.signals if s.id.startswith("SIGMA_")), self.name)
+            ident = f"{rule.lower()}|{ident}"
+        return f"{self.source}|{ident}|{(self.sha256 or '').lower()}"
 
     @property
     def image_name(self) -> str:

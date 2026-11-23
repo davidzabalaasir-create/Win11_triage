@@ -10,13 +10,16 @@ Herramienta de **triaje defensivo y respuesta a incidentes** para Windows 11. Ex
 
 - persistencia;
 - procesos y conexiones de red;
-- eventos de Windows;
+- eventos de Windows y **reglas Sigma** (con Sysmon si está instalado);
+- **extensiones de navegador** (Chrome, Edge, Brave y Firefox);
 - contenido de los ejecutables (análisis PE y YARA);
-- reputación en VirusTotal.
+- reputación en VirusTotal, **AbuseIPDB** y **MalwareBazaar**.
 
 Con todo ello, **puntúa cada elemento de 0 a 100 explicando por qué** y lo relaciona con técnicas de **MITRE ATT&CK**.
 
-Se usa con **interfaz gráfica** o desde la **línea de comandos**. Es **solo lectura**: nunca borra, termina procesos ni sube ficheros.
+Para cada hallazgo te dice **«¿Qué hago con esto?»** con pasos concretos, y un **asistente de IA** (Groq gratuito u Ollama local) responde a tus preguntas sobre el análisis. Se usa con **interfaz gráfica** (español o inglés) o desde la **línea de comandos**, en este equipo o en **otros por WinRM**, y puede vigilar el equipo con **análisis programados** que avisan solo de lo nuevo. Es **solo lectura**: nunca borra, termina procesos ni sube ficheros.
+
+🌐 Página del proyecto: <https://davidzabalaasir-create.github.io/Win11_triage/>
 
 ![Panel de win11-triage](docs/gui.png)
 
@@ -30,7 +33,11 @@ Se usa con **interfaz gráfica** o desde la **línea de comandos**. Es **solo le
 | `--events [DÍAS]` | `wevtutil` | Servicios instalados (7045), tareas creadas (4698) y detecciones de Defender (1116/1117) |
 | `--network` | `psutil` (`tcpvcon` de respaldo) | Conexiones externas, correlacionadas **por PID y ruta exacta** |
 | `--static` | `pefile` + YARA | Empaquetadores, entropía alta, imports de inyección, timestamps imposibles y reglas YARA |
+| `--sigma` | Sysmon, Security 4688, PowerShell 4104, System 7045 | **Reglas Sigma** (11 incluidas + las tuyas en `sigma/*.yml`): Office lanzando consolas, LOLBins, borrado de instantáneas, volcado de LSASS, claves Run, DNS a túneles… |
+| `--browsers` | Perfiles de Chrome, Edge, Brave y Firefox | Extensiones fuera de la tienda, sin empaquetar o sin firma, con acceso a todos los sitios o permisos peligrosos |
 | `--vt` | API v3 de VirusTotal | Reputación de cada SHA-256, con caché y límite de tasa |
+| `--intel` | AbuseIPDB · MalwareBazaar | Reputación de las IP remotas y hashes de malware conocido (claves gratuitas en `.env`) |
+| `--remote EQUIPO` | PowerShell Remoting (WinRM) | Persistencia, procesos y red de otro equipo, sin instalar nada en él |
 
 ### Puntuación y veredicto
 
@@ -87,28 +94,52 @@ Desde la interfaz, en **«Clave de VirusTotal…»**. A mano: `copy .env.example
 ## Interfaz gráfica
 
 ```powershell
-win11-triage-gui          # o: win11-triage --gui · o doble clic en win11-triage-gui.pyw
+win11-triage-gui          # o: win11-triage --gui · o desde el menú Inicio si usaste el instalador
 ```
 
-![Hallazgos con el porqué de cada uno](docs/gui_hallazgos.png)
+![Hallazgos con el panel de detalle](docs/gui_hallazgos.png)
 
-- **Panel**:
-  - distribución de veredictos y puntuación máxima;
-  - elementos sospechosos por origen;
-  - técnicas ATT&CK observadas;
-  - **«Prioriza esto primero»** (doble clic para saltar al elemento).
-- **Hallazgos**:
-  - filtros, búsqueda (por nombre, ruta, hash o técnica, como `T1059.001`) y orden por columnas;
-  - interruptor **«Solo nuevos»**;
-  - panel **«Por qué»** con cada señal, su peso, su técnica y la evidencia;
-  - acciones: VirusTotal, ATT&CK, copiar hash, ruta o línea de comandos, Explorador e ignorar ruta o hash (también con clic derecho).
-- **Conexiones**: conexiones externas de los procesos señalados. Permite buscar la IP en VirusTotal o copiarla.
-- **Historial**: análisis anteriores. Puedes recargar cualquiera y la tarjeta **«Nuevos»** marca lo que ha aparecido desde el análisis anterior.
-- **Exportar**: CSV de la vista actual (se abre en Excel), HTML, Markdown o JSON.
-- **Perfiles**: **Rápido** o **Completo**. La interfaz recuerda tus preferencias.
-- **Atajos**: `Ctrl+R` analizar · `Esc` cancelar · `Ctrl+F` buscar · `Ctrl+E` exportar CSV · `Ctrl+O` abrir informe · `Ctrl+1…5` pestañas · `F5` volver a comprobar las herramientas.
+| Zona | Qué hay |
+|---|---|
+| **Barra lateral** | Inicio · Hallazgos · Red · Procesos · Historial · Ajustes, con contadores. |
+| **Barra superior** | Título de la página, búsqueda (nombre, ruta, hash o técnica como `T1059.001`), Exportar y el botón principal **Analizar**, que se convierte en **Cancelar** mientras analiza. |
+| **Nuevo análisis** | Perfiles **Rápido**, **Completo** o **Personalizado**; módulos agrupados en *Recolección* y *Enriquecimiento*; días de eventos, límite de VirusTotal, formato del informe y modo demostración. Recuerda la última configuración. |
+| **Inicio** | KPIs con la tendencia frente al análisis anterior, «Prioriza esto primero», puntuación máxima, técnicas ATT&CK y distribución. |
+| **Hallazgos** | Filtros con contador, «Solo nuevos», tabla ordenable y **panel de detalle lateral**. El panel muestra **«¿Qué hago con esto?»**, el porqué con el peso y la evidencia de cada señal, y los datos del archivo, la ejecución, la red y VirusTotal. |
+| **Procesos** | **Árbol padre → hijo** con las ramas sospechosas desplegadas; doble clic salta al hallazgo. |
+| **Ajustes** | Claves (VirusTotal, AbuseIPDB, MalwareBazaar), apariencia e **idioma** (español / inglés), **alertas** (notificación de Windows y webhook), **análisis programado**, herramientas (con instalación por winget), lista blanca, reglas YARA y carpetas. |
+| **Barra de estado** | Estado del entorno (administrador, Sysinternals, VirusTotal), progreso y el **Registro** plegable (`Ctrl+L`). |
 
-El análisis corre en segundo plano y se puede **cancelar** en cualquier momento.
+**Flujo de trabajo del analista:**
+- **Revisión:** marca cada elemento como *Pendiente*, *En revisión*, *Falso positivo* o *Confirmado* con las teclas `P` `R` `F` `C` o desde el detalle, y añade notas.
+  - Se guarda en `review.json` y se recuerda si el mismo elemento vuelve a aparecer.
+  - Sale en los informes y en el CSV.
+  - Puedes filtrar la tabla por estado de revisión.
+- **Comparar análisis:** en Historial, «Comparar con el actual» muestra los elementos nuevos, los resueltos y los que empeoran o mejoran (±10 puntos).
+- **Paquete de evidencias:** Exportar → «Paquete de evidencias (.zip)» incluye los informes HTML, MD y JSON, el CSV, las revisiones, los IoC SHA-256, un `LEEME.txt` y un `SHA256SUMS.txt` para verificar la integridad. No incluye los ficheros sospechosos.
+- **Actualizaciones:** Ajustes → «Buscar actualizaciones». Solo se consulta GitHub cuando lo pides.
+
+**Detalles de uso:**
+- Ignorar una ruta o un hash se aplica al momento y se puede **deshacer** desde el aviso.
+- Copiar un hash confirma en el propio botón.
+- Al terminar un análisis aparece un aviso con acceso directo a lo detectado.
+
+**Atajos:**
+- `Ctrl+N` nuevo análisis · `Ctrl+R` repetir el último · `Esc` cancelar
+- `Ctrl+F` buscar · `Ctrl+E` exportar CSV · `Ctrl+O` abrir informe
+- `Ctrl+1…6` páginas · `F5` volver a comprobar las herramientas
+
+<details><summary>Árbol de procesos</summary>
+
+![Árbol de procesos](docs/gui_procesos.png)
+
+</details>
+
+<details><summary>Tema claro</summary>
+
+![Tema claro](docs/gui_claro.png)
+
+</details>
 
 ## Línea de comandos
 
@@ -120,15 +151,30 @@ win11-triage --all                    # todos los módulos
 win11-triage --autoruns --processes --network   # triaje rápido sin red externa
 win11-triage --events 30              # servicios, tareas y Defender de los últimos 30 días
 win11-triage --all --format all --vt-limit 20
-win11-triage --dry-run                # demostración con datos de ejemplo
+win11-triage --dry-run --explain      # demostración con datos de ejemplo y pasos recomendados
+win11-triage --sigma --browsers --intel          # reglas Sigma, extensiones y reputación
+win11-triage --remote PC-01 --remote-user CORP\\ana  # otro equipo por WinRM
+win11-triage --schedule daily --at 08:30         # análisis diario que solo avisa de novedades
+win11-triage --all --webhook https://hooks.slack.com/… --alert-new --notify
+win11-triage --all --lang en --format pdf        # resumen ejecutivo en inglés
 ```
 
 | Opción | Descripción |
 |---|---|
 | `--all` | Activa todos los módulos |
 | `--vt-limit N` | Máximo de consultas **nuevas** a VirusTotal (las de caché no cuentan) |
-| `--format md\|html\|json\|both\|all` | Formato del informe (`both` = md + json, `all` = los tres) |
+| `--format md\|html\|json\|pdf\|both\|all` | Formato del informe (`pdf` = resumen ejecutivo de una página, `both` = md + json, `all` = todos) |
+| `--explain` | «¿Qué hago con esto?» para los 5 elementos más graves |
+| `--lang es\|en` | Idioma de los informes y mensajes (también `WIN11_TRIAGE_LANG`) |
+| `--notify` · `--webhook URL` · `--jsonl FICHERO` | Notificación de Windows · Slack, Teams, Splunk HEC o JSON genérico · JSON Lines para Wazuh/Filebeat |
+| `--alert-new` | Las alertas incluyen solo lo nuevo o lo que empeora respecto al análisis anterior |
+| `--schedule daily\|weekly\|off\|status` · `--at HH:MM` | Análisis programado con el Programador de tareas |
+| `--remote EQUIPO` · `--remote-user U` · `--remote-ssl` | Triaje remoto por WinRM (5985, o 5986 con SSL) |
 | `--output-dir DIR` / `--config-dir DIR` | Carpeta de informes / de `.env`, `whitelist.json`, `vt_cache.json` y `yara/` |
+| `--evidence` | Además, paquete de evidencias `.zip` |
+| `--min-score N` | Muestra e informa solo los elementos con score ≥ N |
+| `--fail-on-score N` | Código de salida 2 si algún elemento llega a N (para pipelines y tareas programadas) |
+| `--check-update` | Comprueba si hay una versión nueva |
 | `--no-report` · `--no-color` · `-v` · `--gui` | Sin informe · sin colores · detallado · abrir la interfaz |
 
 **Códigos de salida:**
@@ -139,6 +185,29 @@ win11-triage --dry-run                # demostración con datos de ejemplo
 
 Sirven para tareas programadas o pipelines.
 
+## Asistente de IA
+
+Pregunta en lenguaje natural sobre un análisis: «¿qué reviso primero?», «¿estoy infectado?», «explícame este hallazgo».
+
+```powershell
+win11-triage --all --ask "¿Qué debería revisar primero?"
+win11-triage --report reportes\triage_PC_20261123_0930.json --ask "¿Es grave lo de sethc.exe?"
+```
+
+En la interfaz: página **Asistente** (con preguntas sugeridas) y la clave en **Ajustes → Asistente de IA**.
+
+| Proveedor | Coste | Configuración (`.env`) |
+|---|---|---|
+| **Groq** (por defecto, modelo `openai/gpt-oss-120b`) | Gratis con límites diarios | `GROQ_API_KEY` ([crear clave](https://console.groq.com/keys)) |
+| **Ollama** (en tu PC, sin Internet) | Gratis | `AI_PROVIDER=ollama` y `AI_MODEL=llama3.1` |
+| Otro compatible con OpenAI | Según el servicio | `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY` |
+
+**Privacidad y seguridad:**
+- Se envía un **resumen** del análisis. El detalle de un hallazgo solo se envía cuando el asistente lo pide.
+- El usuario de Windows y el nombre del equipo se sustituyen por `<usuario>` y `<equipo>`.
+- Nunca se envían ficheros.
+- El asistente solo tiene herramientas de **lectura**: listar y ver hallazgos, cadenas de procesos y proponer una entrada de lista blanca, que no aplica. No puede cambiar nada del equipo.
+
 ## Informes
 
 En `reportes/triage_<equipo>_<fecha>.{html,md,json}`. Incluyen:
@@ -147,9 +216,10 @@ En `reportes/triage_<equipo>_<fecha>.{html,md,json}`. Incluyen:
 - **«Prioriza esto primero»** (los 5 elementos de mayor puntuación);
 - tabla de **técnicas ATT&CK** con enlaces a attack.mitre.org;
 - una tabla por módulo con su puntuación y el «por qué»;
-- detalle de cada elemento con sus señales (peso, técnica y evidencia), sus conexiones y VirusTotal.
+- detalle de cada elemento con sus señales (peso, técnica y evidencia), sus conexiones, VirusTotal y la **revisión del analista**;
+- **cronología**: los elementos con fecha, ordenados del más reciente al más antiguo.
 
-El **HTML** es un único archivo que se puede imprimir a PDF. El **JSON** (`schema_version: 2`) está pensado para SIEM y automatización:
+El **PDF ejecutivo** (`--format pdf`) resume en una página el veredicto, las cifras, lo más grave con qué hacer y las técnicas observadas, para quien tiene que decidir. El **HTML** es un único archivo con todo el detalle, incluido «¿Qué hago con esto?» y las **cadenas de procesos sospechosos**. El **JSON** (`schema_version: 2`) está pensado para SIEM y automatización:
 
 ```json
 { "schema_version": 2, "max_score": 100,
@@ -163,7 +233,8 @@ El **HTML** es un único archivo que se puede imprimir a PDF. El **JSON** (`sche
 
 | Archivo | Para qué |
 |---|---|
-| `.env` | `VT_API_KEY` y, opcionalmente, `SYSINTERNALS_DIR` |
+| `.env` | `VT_API_KEY`; opcionales: `ABUSEIPDB_API_KEY`, `MALWAREBAZAAR_API_KEY`, `WIN11_TRIAGE_WEBHOOK`, `SPLUNK_HEC_TOKEN`, `SYSINTERNALS_DIR` |
+| `sigma/*.yml` | Tus reglas Sigma (formato estándar: `logsource`, `detection`, `condition`, modificadores `contains`/`startswith`/`endswith`/`all`/`re`/`cidr`) |
 | `whitelist.json` | `paths` (admite `*`, `%VAR%` y carpetas terminadas en `\`), `hashes` y `publishers` (solo se aplica a elementos con firma válida) |
 | `yara/*.yar` | Tus reglas YARA. Se suman a las incluidas; usa `meta: description`, `mitre` y `weight` |
 | `vt_cache.json` | Caché de VirusTotal. Los «no encontrado» caducan a los 7 días |

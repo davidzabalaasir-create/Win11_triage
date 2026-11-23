@@ -17,6 +17,8 @@ datas = [
     (os.path.join(PKG, "samples"), "win11_triage/samples"),
     (os.path.join(PKG, "assets"), "win11_triage/assets"),
     (os.path.join(PKG, "rules", "yara"), "win11_triage/rules/yara"),
+    (os.path.join(PKG, "rules", "sigma"), "win11_triage/rules/sigma"),
+    (os.path.join(PKG, "remote"), "win11_triage/remote"),
     *collect_data_files("customtkinter"),
 ]
 excludes = ["matplotlib", "numpy", "pandas", "scipy", "pytest", "IPython"]

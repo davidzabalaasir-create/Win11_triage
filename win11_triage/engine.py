@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import collectors, collectors_events, collectors_live, env_check
+from . import collectors, collectors_browsers, collectors_events, collectors_live, env_check, intel, remote, sigma
 from .enrich import eligible, file_of, pe_static, yara_scan
 from .models import Cancelled, Finding, Signal
 from .report import TriageResult
@@ -35,6 +35,9 @@ SECTION_AUTORUNS = "Persistencia (Autoruns)"
 SECTION_SIGCHECK = "Carpetas de usuario (Sigcheck) — sin firma válida"
 SECTION_PROCESSES = "Procesos en ejecución — sospechosos"
 SECTION_EVENTS = "Eventos de Windows — servicios, tareas y Defender"
+SECTION_SIGMA = "Reglas Sigma — Sysmon, 4688, PowerShell"
+SECTION_BROWSERS = "Extensiones de navegador"
+REMOTE_MODULES = {"autoruns", "processes"}  # el resto necesita herramientas o ficheros locales
 
 
 APP_NAME = "win11-triage"
@@ -71,27 +74,33 @@ class TriageOptions:
     scan_user: bool = False
     processes: bool = False
     events: bool = False
+    sigma: bool = False
+    browsers: bool = False
     network: bool = False
     static: bool = False
     vt: bool = False
+    intel: bool = False
     dry_run: bool = False
     vt_limit: int | None = None
     event_days: int = 7
     config_dir: Path | None = None
+    remote_host: str | None = None  # triaje remoto por WinRM
+    remote_user: str | None = None
+    remote_ssl: bool = False
 
     def __post_init__(self) -> None:
         self.config_dir = (self.config_dir or default_config_dir()).resolve()
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        if (self.vt or self.network or self.static) and not self.any_collector:
+        if (self.vt or self.network or self.static or self.intel) and not self.any_collector:
             self.autoruns = self.scan_user = True  # necesitan hallazgos de los que partir
 
     @property
     def any_collector(self) -> bool:
-        return self.autoruns or self.scan_user or self.processes or self.events
+        return self.autoruns or self.scan_user or self.processes or self.events or self.sigma or self.browsers
 
     @property
     def required_tools(self) -> set[str]:
-        if self.dry_run:
+        if self.dry_run or self.remote_host:
             return set()
         return {n for n, on in (("autorunsc.exe", self.autoruns), ("sigcheck.exe", self.scan_user)) if on}
 
@@ -159,6 +168,7 @@ class TriageEngine:
         self.cancel = cancel or threading.Event()
         self._procs: dict[int, collectors_live.ProcInfo] | None = None
         self._conns: list | None = None
+        self._remote: dict[str, Any] | None = None
 
     def _check_cancel(self) -> None:
         if self.cancel.is_set():
@@ -167,22 +177,33 @@ class TriageEngine:
     def run(self) -> TriageResult:
         """Ejecuta los módulos activos. Puede lanzar WhitelistError o Cancelled."""
         whitelist = Whitelist.load(self.opts.whitelist_file, create=not self.opts.dry_run)
+        started = datetime.now()
+        if self.opts.remote_host:
+            self._remote = self._collect_remote()
+        rem = self._remote or {}
         res = TriageResult(
-            host=platform.node() or "host",
-            user=getpass.getuser(),
-            started=datetime.now(),
+            host=rem.get("host") or platform.node() or "host",
+            user=rem.get("user") or getpass.getuser(),
+            started=started,
             dry_run=self.opts.dry_run,
-            admin=env_check.is_admin(),
+            admin=bool(rem["admin"]) if rem else env_check.is_admin(),
             tools=self.tools,
         )
+        if rem:
+            res.modules.append(f"remote:{self.opts.remote_host}")
         plan = (
             ("autoruns", self.opts.autoruns, SECTION_AUTORUNS, self._autoruns),
             ("scan-user", self.opts.scan_user, SECTION_SIGCHECK, self._sigcheck),
             ("processes", self.opts.processes, SECTION_PROCESSES, self._processes),
             ("events", self.opts.events, SECTION_EVENTS, self._events),
+            ("sigma", self.opts.sigma, SECTION_SIGMA, self._sigma),
+            ("browsers", self.opts.browsers, SECTION_BROWSERS, self._browsers),
         )
         for module, enabled, section, fn in plan:
             if not enabled:
+                continue
+            if rem and module not in REMOTE_MODULES:
+                self.r.warn(f"Módulo «{module}» no disponible en remoto: se omite.")
                 continue
             self._check_cancel()
             res.modules.append(module)
@@ -203,7 +224,9 @@ class TriageEngine:
             self._check_cancel()
             res.modules.append("network")
             self._network(res)
-        if self.opts.static:
+        if self.opts.static and rem:
+            self.r.warn("El análisis de contenido necesita los ficheros en local: se omite en remoto.")
+        elif self.opts.static:
             self._check_cancel()
             res.modules.append("static")
             self._static(res)
@@ -213,6 +236,12 @@ class TriageEngine:
             res.modules.append("vt")
             self._vt(res)
         apply_vt(res.findings)
+        if self.opts.intel:
+            self._check_cancel()
+            res.modules.append("intel")
+            self._intel(res)
+        if self._procs is not None:
+            self._record_process_tree(res)
         res.finished = datetime.now()
         return res
 
@@ -221,7 +250,26 @@ class TriageEngine:
         self.r.error(msg)
 
     # --------------------------------------------------------- colectores
+    def _collect_remote(self) -> dict[str, Any]:
+        host = self.opts.remote_host or ""
+        if self.opts.dry_run:
+            data = remote.parse_output(sample_text("remote_sample.json"))
+            data["host"] = host.upper() if host != "demo" else data["host"]
+            return data
+        self.r.stage(f"Conectando por WinRM con {host} y recolectando (solo lectura)…")
+        try:
+            data = remote.collect(host, self.opts.remote_user, self.opts.remote_ssl)
+        finally:
+            self.r.done()
+        self.r.info(
+            f"Remoto {data.get('host')}: {len(data['processes'])} procesos · {len(data['autoruns'])} puntos de "
+            f"persistencia · {len(data['connections'])} conexiones."
+        )
+        return data
+
     def _autoruns(self, res: TriageResult) -> list[Finding]:
+        if self._remote is not None:
+            return remote.autorun_findings(self._remote)
         if self.opts.dry_run:
             raw = sample_text("autorunsc_sample.csv").encode("utf-16")  # mismo decodificador que el real
             return collectors.parse_autoruns(collectors.decode_output(raw))
@@ -246,7 +294,9 @@ class TriageEngine:
     def _snapshot(self) -> tuple[dict[int, collectors_live.ProcInfo], list]:
         """Procesos y conexiones (una sola captura compartida por --processes y --network)."""
         if self._procs is None:
-            if self.opts.dry_run:
+            if self._remote is not None:
+                self._procs, self._conns = remote.snapshot(self._remote)
+            elif self.opts.dry_run:
                 self._procs, self._conns = collectors_live.parse_sample(_sample_json("processes_sample.json"))
             else:
                 self.r.stage("Capturando procesos y conexiones…")
@@ -254,12 +304,37 @@ class TriageEngine:
                 self._conns = collectors_live.snapshot_connections(self._procs)
         return self._procs, self._conns or []
 
+    def _record_process_tree(self, res: TriageResult) -> None:
+        """Guarda el árbol de procesos con los señalados marcados (para la vista de árbol y los informes)."""
+        scores: dict[int, int] = {}
+        for f in res.findings:
+            if f.pid is not None:
+                scores[f.pid] = max(scores.get(f.pid, 0), f.score)
+        res.processes = [
+            {
+                "pid": p.pid,
+                "ppid": p.ppid,
+                "name": p.name,
+                "exe": p.exe,
+                "cmdline": p.cmdline[:500],
+                "created": p.created,
+                "flagged": p.pid in scores,
+                "score": scores.get(p.pid, 0),
+            }
+            for p in (self._procs or {}).values()
+        ]
+
     def _processes(self, res: TriageResult) -> list[Finding]:
         if not collectors_live.available():
             self._fail(res, "psutil no está instalado: se omite el análisis de procesos")
             return []
         procs, _ = self._snapshot()
-        found = collectors_live.process_findings(procs, compute_hashes=not self.opts.dry_run)
+        local = not self.opts.dry_run and self._remote is None
+        found = collectors_live.process_findings(procs, compute_hashes=local)
+        if self._remote is not None:
+            hashes = remote.process_hashes(self._remote)
+            for f in found:
+                f.sha256 = f.sha256 or hashes.get(f.path.lower(), "")
         self.r.info(f"Procesos: {len(procs)} en ejecución · {len(found)} con indicios sospechosos.")
         return found
 
@@ -274,6 +349,33 @@ class TriageEngine:
                 res.errors.append(w)
                 self.r.warn(w)
         self.r.info(f"Eventos: {len(found)} relevantes (servicios, tareas, Defender).")
+        return found
+
+    def _sigma(self, res: TriageResult) -> list[Finding]:
+        self.r.stage("Aplicando reglas Sigma a los eventos…")
+        rules, warnings = sigma.load_rules(self.opts.config_dir / "sigma")  # type: ignore[operator]
+        if self.opts.dry_run:
+            events = collectors_events.parse_events(sample_text("sysmon_sample.xml"))
+            have_sysmon = True
+        else:
+            events, more, have_sysmon = collectors_events.collect_raw_events(self.opts.event_days)
+            warnings += more
+        for w in warnings:
+            res.errors.append(w)
+            self.r.warn(w)
+        found = sigma.scan_events(events, rules)
+        src = "Sysmon + Windows" if have_sysmon else "Windows (sin Sysmon)"
+        self.r.info(f"Sigma: {len(rules)} reglas sobre {len(events)} eventos ({src}) → {len(found)} coincidencias.")
+        return found
+
+    def _browsers(self, res: TriageResult) -> list[Finding]:
+        self.r.stage("Revisando extensiones de Chrome, Edge, Brave y Firefox…")
+        if self.opts.dry_run:
+            exts = _sample_json("browsers_sample.json")["extensions"]
+        else:
+            exts = collectors_browsers.collect_extensions()
+        found = collectors_browsers.extension_findings(exts)
+        self.r.info(f"Navegadores: {len(exts)} extensiones · {len(found)} con permisos u origen a revisar.")
         return found
 
     # --------------------------------------------------------- red
@@ -349,6 +451,31 @@ class TriageEngine:
             f.signals += seen[path]
         self.r.done()
         self.r.info(f"Contenido: {analysed} fichero(s) analizados (PE{' + YARA' if scanner else ''}).")
+
+    # --------------------------------------------------------- reputación
+    def _intel(self, res: TriageResult) -> None:
+        self.r.stage("Consultando reputación (AbuseIPDB, MalwareBazaar)…")
+        if self.opts.dry_run:
+            known = {h for h, v in _sample_json("vt_responses.json").items() if isinstance(v, dict) and v.get("label")}
+            ip_lookup, hash_lookup = intel.demo_ip_lookup, intel.demo_hash_lookup(known)
+        else:
+            abuse = os.environ.get("ABUSEIPDB_API_KEY", "").strip()
+            mb = os.environ.get("MALWAREBAZAAR_API_KEY", "").strip()
+            ip_lookup = intel.abuseipdb_lookup(abuse) if abuse else None
+            hash_lookup = intel.malwarebazaar_lookup(mb) if mb else None
+            if not (abuse or mb):
+                msg = "Ni ABUSEIPDB_API_KEY ni MALWAREBAZAAR_API_KEY configuradas: se omite la reputación."
+                res.errors.append(msg)
+                self.r.warn(msg)
+                return
+        cache = intel.IntelCache(self.opts.config_dir / "intel_cache.json", persist=not self.opts.dry_run)  # type: ignore[operator]
+        stats = intel.enrich(res.findings, ip_lookup, hash_lookup, cache, on_warn=self.r.warn)
+        res.intel_stats = stats
+        self.r.done()
+        self.r.info(
+            f"Reputación: {stats['ips']} IP ({stats['ip_bad']} maliciosas) · {stats['hashes']} hashes "
+            f"({stats['hash_known']} conocidos en MalwareBazaar) · {stats['cache']} desde caché."
+        )
 
     # --------------------------------------------------------- VirusTotal
     def _vt(self, res: TriageResult) -> None:

@@ -1,0 +1,97 @@
+{
+  "_comment": "Extensiones simuladas para --dry-run.",
+  "extensions": [
+    {
+      "browser": "Chrome",
+      "profile": "Default",
+      "id": "aapbdbdomjkkjkaonfhkkikfgjllcleb",
+      "name": "Google Translate",
+      "version": "2.0.16",
+      "path": "C:\\Users\\usuario\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Extensions\\aapbdbdomjkkjkaonfhkkikfgjllcleb\\2.0.16_0",
+      "permissions": [
+        "activeTab",
+        "contextMenus",
+        "storage"
+      ],
+      "hosts": [],
+      "from_store": true,
+      "location": "tienda",
+      "unpacked": false,
+      "enabled": true,
+      "installed": "2025-03-01T10:00:00+00:00",
+      "signed": true,
+      "update_url": ""
+    },
+    {
+      "browser": "Chrome",
+      "profile": "Default",
+      "id": "kpdmlhoaejgdjcfkbnpmnkajpecojbgn",
+      "name": "PDF Converter Pro",
+      "version": "1.4.2",
+      "path": "C:\\Users\\usuario\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Extensions\\kpdmlhoaejgdjcfkbnpmnkajpecojbgn\\1.4.2_0",
+      "permissions": [
+        "cookies",
+        "nativeMessaging",
+        "proxy",
+        "tabs",
+        "webRequest"
+      ],
+      "hosts": [
+        "<all_urls>"
+      ],
+      "from_store": false,
+      "location": "registro",
+      "unpacked": false,
+      "enabled": true,
+      "installed": "2026-11-21T22:12:30+00:00",
+      "signed": true,
+      "update_url": "https://cdn-demo.example/update.xml"
+    },
+    {
+      "browser": "Edge",
+      "profile": "Default",
+      "id": "odfafepnkmbhccpbejgmiehpchacaeak",
+      "name": "uBlock Origin",
+      "version": "1.60.0",
+      "path": "C:\\Users\\usuario\\AppData\\Local\\Microsoft\\Edge\\User Data\\Default\\Extensions\\odfafepnkmbhccpbejgmiehpchacaeak\\1.60.0_0",
+      "permissions": [
+        "storage",
+        "webNavigation",
+        "webRequest"
+      ],
+      "hosts": [
+        "<all_urls>"
+      ],
+      "from_store": true,
+      "location": "tienda",
+      "unpacked": false,
+      "enabled": true,
+      "installed": "2024-06-11T09:00:00+00:00",
+      "signed": true,
+      "update_url": ""
+    },
+    {
+      "browser": "Firefox",
+      "profile": "x1y2.default-release",
+      "id": "helper@tabsync.local",
+      "name": "Tab Sync Helper",
+      "version": "0.3",
+      "path": "C:\\Users\\usuario\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\x1y2.default-release\\extensions\\helper@tabsync.local.xpi",
+      "permissions": [
+        "cookies",
+        "history",
+        "tabs"
+      ],
+      "hosts": [
+        "<all_urls>"
+      ],
+      "from_store": false,
+      "location": "app-profile",
+      "unpacked": false,
+      "enabled": true,
+      "installed": "2026-11-20T18:00:00+00:00",
+      "signed": false,
+      "update_url": ""
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+title: Intérprete de scripts conectando a Internet
+title_en: Script interpreter connecting to the Internet
+id: w11t-net-script-host
+status: stable
+description: PowerShell, wscript, mshta, rundll32 o regsvr32 abren conexiones salientes a direcciones públicas.
+author: David
+tags: [attack.command_and_control, attack.t1071.001]
+logsource: {product: windows, category: network_connection}
+detection:
+  img:
+    Image|endswith: ['\powershell.exe', '\wscript.exe', '\cscript.exe', '\mshta.exe', '\rundll32.exe', '\regsvr32.exe']
+  private:
+    DestinationIp|cidr: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8']
+  condition: img and not private
+level: medium

@@ -1,0 +1,16 @@
+title: Office lanza una consola o intérprete
+title_en: Office launches a console or interpreter
+id: w11t-office-child-shell
+status: stable
+description: Word, Excel, PowerPoint u Outlook crean cmd, PowerShell, wscript o mshta (macro maliciosa típica).
+author: David
+tags: [attack.execution, attack.t1204.002, attack.t1059]
+logsource: {product: windows, category: process_creation}
+detection:
+  parent:
+    ParentImage|endswith: ['\winword.exe', '\excel.exe', '\powerpnt.exe', '\outlook.exe', '\onenote.exe']
+  child:
+    Image|endswith: ['\cmd.exe', '\powershell.exe', '\pwsh.exe', '\wscript.exe', '\cscript.exe', '\mshta.exe', '\rundll32.exe', '\regsvr32.exe']
+  condition: parent and child
+falsepositives: [Complementos de Office legítimos que lanzan scripts]
+level: high

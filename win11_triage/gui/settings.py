@@ -13,6 +13,9 @@ DEFAULTS: dict[str, Any] = {
         "scan_user": True,
         "processes": True,
         "events": True,
+        "sigma": True,
+        "browsers": True,
+        "intel": False,
         "network": True,
         "static": True,
         "vt": True,
@@ -21,6 +24,12 @@ DEFAULTS: dict[str, Any] = {
     "vt_limit": "",
     "format": "HTML",
     "geometry": "",
+    "appearance": "Oscuro",
+    "notify": True,
+    "alert_new": True,
+    "schedule": "Desactivado",
+    "schedule_at": "09:00",
+    "language": "es",
 }
 
 
@@ -32,7 +41,18 @@ def load(config_dir: Path) -> dict[str, Any]:
         return data
     if isinstance(stored, dict):
         data["modules"].update({k: bool(v) for k, v in stored.get("modules", {}).items() if k in data["modules"]})
-        for key in ("event_days", "vt_limit", "format", "geometry"):
+        for key in (
+            "event_days",
+            "vt_limit",
+            "format",
+            "geometry",
+            "appearance",
+            "notify",
+            "alert_new",
+            "schedule",
+            "schedule_at",
+            "language",
+        ):
             if key in stored:
                 data[key] = stored[key]
     return data

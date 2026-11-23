@@ -75,7 +75,7 @@ def _selftest(app) -> int:
     """Análisis de demostración con la ventana oculta. 0 = OK."""
     app.withdraw()
     app.var_dry.set(True)
-    app.format_menu.set("Todos (HTML+MD+JSON)")
+    app.var_format.set("Todos (HTML+MD+JSON+PDF)")
     app.start()
     end = time.monotonic() + 120
     while (app.result is None or (app.worker and app.worker.is_alive())) and time.monotonic() < end:
