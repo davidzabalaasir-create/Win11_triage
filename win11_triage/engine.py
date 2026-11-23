@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import collectors, collectors_browsers, collectors_events, collectors_live, env_check, intel, sigma
+from . import collectors, collectors_browsers, collectors_events, collectors_live, env_check, intel, remote, sigma
 from .enrich import eligible, file_of, pe_static, yara_scan
 from .models import Cancelled, Finding, Signal
 from .report import TriageResult
@@ -37,6 +37,7 @@ SECTION_PROCESSES = "Procesos en ejecución — sospechosos"
 SECTION_EVENTS = "Eventos de Windows — servicios, tareas y Defender"
 SECTION_SIGMA = "Reglas Sigma — Sysmon, 4688, PowerShell"
 SECTION_BROWSERS = "Extensiones de navegador"
+REMOTE_MODULES = {"autoruns", "processes"}  # el resto necesita herramientas o ficheros locales
 
 
 APP_NAME = "win11-triage"
@@ -83,6 +84,9 @@ class TriageOptions:
     vt_limit: int | None = None
     event_days: int = 7
     config_dir: Path | None = None
+    remote_host: str | None = None  # triaje remoto por WinRM
+    remote_user: str | None = None
+    remote_ssl: bool = False
 
     def __post_init__(self) -> None:
         self.config_dir = (self.config_dir or default_config_dir()).resolve()
@@ -96,7 +100,7 @@ class TriageOptions:
 
     @property
     def required_tools(self) -> set[str]:
-        if self.dry_run:
+        if self.dry_run or self.remote_host:
             return set()
         return {n for n, on in (("autorunsc.exe", self.autoruns), ("sigcheck.exe", self.scan_user)) if on}
 
@@ -164,6 +168,7 @@ class TriageEngine:
         self.cancel = cancel or threading.Event()
         self._procs: dict[int, collectors_live.ProcInfo] | None = None
         self._conns: list | None = None
+        self._remote: dict[str, Any] | None = None
 
     def _check_cancel(self) -> None:
         if self.cancel.is_set():
@@ -172,14 +177,20 @@ class TriageEngine:
     def run(self) -> TriageResult:
         """Ejecuta los módulos activos. Puede lanzar WhitelistError o Cancelled."""
         whitelist = Whitelist.load(self.opts.whitelist_file, create=not self.opts.dry_run)
+        started = datetime.now()
+        if self.opts.remote_host:
+            self._remote = self._collect_remote()
+        rem = self._remote or {}
         res = TriageResult(
-            host=platform.node() or "host",
-            user=getpass.getuser(),
-            started=datetime.now(),
+            host=rem.get("host") or platform.node() or "host",
+            user=rem.get("user") or getpass.getuser(),
+            started=started,
             dry_run=self.opts.dry_run,
-            admin=env_check.is_admin(),
+            admin=bool(rem["admin"]) if rem else env_check.is_admin(),
             tools=self.tools,
         )
+        if rem:
+            res.modules.append(f"remote:{self.opts.remote_host}")
         plan = (
             ("autoruns", self.opts.autoruns, SECTION_AUTORUNS, self._autoruns),
             ("scan-user", self.opts.scan_user, SECTION_SIGCHECK, self._sigcheck),
@@ -190,6 +201,9 @@ class TriageEngine:
         )
         for module, enabled, section, fn in plan:
             if not enabled:
+                continue
+            if rem and module not in REMOTE_MODULES:
+                self.r.warn(f"Módulo «{module}» no disponible en remoto: se omite.")
                 continue
             self._check_cancel()
             res.modules.append(module)
@@ -210,7 +224,9 @@ class TriageEngine:
             self._check_cancel()
             res.modules.append("network")
             self._network(res)
-        if self.opts.static:
+        if self.opts.static and rem:
+            self.r.warn("El análisis de contenido necesita los ficheros en local: se omite en remoto.")
+        elif self.opts.static:
             self._check_cancel()
             res.modules.append("static")
             self._static(res)
@@ -234,7 +250,26 @@ class TriageEngine:
         self.r.error(msg)
 
     # --------------------------------------------------------- colectores
+    def _collect_remote(self) -> dict[str, Any]:
+        host = self.opts.remote_host or ""
+        if self.opts.dry_run:
+            data = remote.parse_output(sample_text("remote_sample.json"))
+            data["host"] = host.upper() if host != "demo" else data["host"]
+            return data
+        self.r.stage(f"Conectando por WinRM con {host} y recolectando (solo lectura)…")
+        try:
+            data = remote.collect(host, self.opts.remote_user, self.opts.remote_ssl)
+        finally:
+            self.r.done()
+        self.r.info(
+            f"Remoto {data.get('host')}: {len(data['processes'])} procesos · {len(data['autoruns'])} puntos de "
+            f"persistencia · {len(data['connections'])} conexiones."
+        )
+        return data
+
     def _autoruns(self, res: TriageResult) -> list[Finding]:
+        if self._remote is not None:
+            return remote.autorun_findings(self._remote)
         if self.opts.dry_run:
             raw = sample_text("autorunsc_sample.csv").encode("utf-16")  # mismo decodificador que el real
             return collectors.parse_autoruns(collectors.decode_output(raw))
@@ -259,7 +294,9 @@ class TriageEngine:
     def _snapshot(self) -> tuple[dict[int, collectors_live.ProcInfo], list]:
         """Procesos y conexiones (una sola captura compartida por --processes y --network)."""
         if self._procs is None:
-            if self.opts.dry_run:
+            if self._remote is not None:
+                self._procs, self._conns = remote.snapshot(self._remote)
+            elif self.opts.dry_run:
                 self._procs, self._conns = collectors_live.parse_sample(_sample_json("processes_sample.json"))
             else:
                 self.r.stage("Capturando procesos y conexiones…")
@@ -292,7 +329,12 @@ class TriageEngine:
             self._fail(res, "psutil no está instalado: se omite el análisis de procesos")
             return []
         procs, _ = self._snapshot()
-        found = collectors_live.process_findings(procs, compute_hashes=not self.opts.dry_run)
+        local = not self.opts.dry_run and self._remote is None
+        found = collectors_live.process_findings(procs, compute_hashes=local)
+        if self._remote is not None:
+            hashes = remote.process_hashes(self._remote)
+            for f in found:
+                f.sha256 = f.sha256 or hashes.get(f.path.lower(), "")
         self.r.info(f"Procesos: {len(procs)} en ejecución · {len(found)} con indicios sospechosos.")
         return found
 

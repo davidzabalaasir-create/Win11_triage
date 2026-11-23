@@ -52,6 +52,16 @@ jobs:
           xvfb-run -a pytest -q
       - name: Dry-run de humo
         run: win11-triage --dry-run --no-color --format both --config-dir .
+      - name: Script remoto (WinRM) - sintaxis y ejecución local
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/win11_triage/remote/collect.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors; exit 1 }
+          $json = powershell.exe -NoProfile -ExecutionPolicy Bypass -File win11_triage/remote/collect.ps1
+          ($json -join "`n") | Set-Content -Encoding utf8 remote.json
+          python -c "from pathlib import Path; from win11_triage import remote; d = remote.parse_output(Path('remote.json').read_text(encoding='utf-8-sig')); print(d['host'], len(d['processes']), 'procesos', len(d['autoruns']), 'autoruns'); assert d['processes'] and d['autoruns']"
 
   build-exe:
     needs: test

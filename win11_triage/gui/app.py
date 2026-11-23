@@ -34,6 +34,7 @@ from .. import __version__, alerts, collectors_live, env_check, history, playboo
 from ..engine import PLACEHOLDER_KEY, Reporter, TriageEngine, TriageOptions
 from ..enrich import pe_static, yara_scan
 from ..models import Cancelled, Finding, Status
+from ..remote import RemoteError, valid_host
 from ..report import TriageResult
 from ..review import PENDING, STATE_KEYS, STATE_TOKEN, STATES, ReviewStore
 from ..rules.attack import attack_url, technique_name
@@ -202,6 +203,7 @@ class TriageApp(ctk.CTk):
         self.var_vt_limit = ctk.StringVar(value=str(self.prefs.get("vt_limit") or ""))
         fmt = self.prefs.get("format")
         self.var_format = ctk.StringVar(value=fmt if fmt in FORMATS else "HTML")
+        self.var_remote = ctk.StringVar(value="")
         self.var_notify = ctk.BooleanVar(value=bool(self.prefs.get("notify", True)))
         self.var_alert_new = ctk.BooleanVar(value=bool(self.prefs.get("alert_new", True)))
 
@@ -1016,6 +1018,10 @@ class TriageApp(ctk.CTk):
         if raw and not raw.isdigit():
             messagebox.showerror("Valor no válido", "El límite de VirusTotal debe ser un número entero.", parent=self)
             return None
+        host = self.var_remote.get().strip()
+        if host and not valid_host(host):
+            messagebox.showerror("Equipo no válido", f"«{host}» no es un nombre de equipo o IP válido.", parent=self)
+            return None
         m = {k: v.get() for k, v in self.module_vars.items()}
         return TriageOptions(
             autoruns=m["autoruns"],
@@ -1032,6 +1038,7 @@ class TriageApp(ctk.CTk):
             vt_limit=int(raw) if raw else None,
             event_days=int(self.var_days.get() or 7),
             config_dir=self.config_dir,
+            remote_host=host or None,
         )
 
     def start(self) -> None:
@@ -1093,7 +1100,7 @@ class TriageApp(ctk.CTk):
             self.events.put(("result", res))
         except Cancelled:
             self.events.put(("cancelled",))
-        except WhitelistError as e:
+        except (WhitelistError, RemoteError) as e:
             self.events.put(("fatal", str(e)))
         except Exception as e:
             log.exception("Error inesperado en el análisis")

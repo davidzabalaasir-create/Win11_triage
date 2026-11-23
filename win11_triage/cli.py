@@ -19,6 +19,7 @@ from rich.status import Status as RichStatus
 from . import __copyright__, __version__, env_check, report
 from .engine import Reporter, TriageEngine, TriageOptions
 from .models import Cancelled, Finding, Status
+from .remote import RemoteError
 from .report import TriageResult
 from .review import ReviewStore
 from .virustotal import VTResult
@@ -106,6 +107,15 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="código de salida 2 si algún elemento tiene score ≥ N (además de las detecciones de VT)",
     )
+    rm = p.add_argument_group("triaje remoto (WinRM)")
+    rm.add_argument(
+        "--remote",
+        metavar="EQUIPO",
+        help="analiza otro equipo por WinRM (persistencia, procesos y red) sin instalar nada en él",
+    )
+    rm.add_argument("--remote-user", metavar="DOMINIO\\USUARIO", help="cuenta remota (Windows pide la contraseña)")
+    rm.add_argument("--remote-ssl", action="store_true", help="usa WinRM sobre HTTPS (puerto 5986)")
+
     al = p.add_argument_group("alertas e integraciones")
     al.add_argument("--notify", action="store_true", help="notificación de Windows al terminar")
     al.add_argument(
@@ -148,6 +158,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         for m in modules:
             setattr(a, m, True)
         a.events = a.events or 7
+    if a.remote and not (a.all or any(getattr(a, m) for m in modules) or a.events is not None):
+        a.autoruns = a.processes = a.network = True  # lo que se puede recoger en remoto
     a.options = TriageOptions(
         autoruns=a.autoruns,
         scan_user=a.scan_user,
@@ -163,6 +175,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         dry_run=a.dry_run,
         vt_limit=a.vt_limit,
         config_dir=a.config_dir,
+        remote_host=a.remote,
+        remote_user=a.remote_user,
+        remote_ssl=a.remote_ssl,
     )
     a.config_dir = a.options.config_dir
     a.output_dir = a.output_dir or a.config_dir / "reportes"
@@ -282,6 +297,8 @@ def run(args: argparse.Namespace) -> int:
 
     tools = env_check.check_all()
     needed = {n for n, on in (("autorunsc.exe", opts.autoruns), ("sigcheck.exe", opts.scan_user)) if on}
+    if opts.remote_host:
+        needed = set()  # en remoto se usa PowerShell, no Sysinternals
     env_ok = show_env(tools, needed, hints=not opts.dry_run)
 
     if not opts.any_collector:
@@ -297,7 +314,7 @@ def run(args: argparse.Namespace) -> int:
     reporter = RichReporter()
     try:
         res = TriageEngine(opts, tools, reporter).run()
-    except WhitelistError as e:
+    except (WhitelistError, RemoteError) as e:
         console.print(f"[red]{e}[/]")
         return EXIT_ENV
     finally:

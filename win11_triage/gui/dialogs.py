@@ -22,7 +22,7 @@ GROUPS = (
             ("processes", "Procesos en ejecución", "Rutas raras, suplantación, Office → consola"),
             ("events", "Eventos de Windows", "Servicios y tareas nuevos, detecciones de Defender"),
             ("browsers", "Extensiones de navegador", "Chrome, Edge, Brave y Firefox: permisos y origen"),
-            ("sigma", "Reglas Sigma", "Sysmon, PowerShell y procesos (4688) con reglas Sigma"),
+            ("sigma", "Reglas Sigma", "Sysmon, PowerShell y procesos (4688)"),
         ),
     ),
     (
@@ -44,7 +44,7 @@ FORMATS = ("HTML", "PDF ejecutivo", "Markdown", "JSON", "Todos (HTML+MD+JSON+PDF
 
 class NewScanDialog(Modal):
     def __init__(self, app: TriageApp) -> None:
-        super().__init__(app, "Nuevo análisis", "740x700")
+        super().__init__(app, "Nuevo análisis", "860x860")
         self.app = app
         actions = ctk.CTkFrame(self, fg_color="transparent")
         actions.pack(side="bottom", fill="x", padx=SPACE["xl"], pady=SPACE["xl"])
@@ -88,7 +88,7 @@ class NewScanDialog(Modal):
                     command=lambda: self.profile.set(self._current_profile()),
                 ).pack(anchor="w", padx=SPACE["l"], pady=(SPACE["s"], 0))
                 ctk.CTkLabel(
-                    box, text=desc, font=font("caption"), text_color=T("text2"), wraplength=260, justify="left"
+                    box, text=desc, font=font("caption"), text_color=T("text2"), wraplength=310, justify="left"
                 ).pack(anchor="w", padx=(SPACE["l"] + 50, SPACE["l"]))
             ctk.CTkFrame(box, fg_color="transparent", height=SPACE["m"]).pack()
 
@@ -133,6 +133,21 @@ class NewScanDialog(Modal):
             font=font("body"),
             progress_color=T("accent"),
         )
+        ctk.CTkLabel(opts, text="Equipo remoto (WinRM)", font=font("caption_bold")).grid(
+            row=2, column=0, sticky="w", padx=SPACE["l"], pady=(SPACE["m"], SPACE["xs"])
+        )
+        remote = ctk.CTkEntry(
+            opts,
+            textvariable=app.var_remote,
+            height=CONTROL_H,
+            corner_radius=RADIUS["control"],
+            fg_color=T("surface2"),
+            border_color=T("border"),
+            font=font("body"),
+            placeholder_text="Vacío = este equipo",
+        )
+        remote.grid(row=2, column=1, columnspan=2, sticky="ew", padx=SPACE["l"], pady=(SPACE["m"], SPACE["xs"]))
+        Tooltip(remote, "Analiza otro PC con tu cuenta de dominio: persistencia, procesos y red. Requiere WinRM.")
         dry.grid(row=3, column=0, columnspan=3, sticky="w", padx=SPACE["l"], pady=(SPACE["s"], SPACE["l"]))
         if not app.windows:
             dry.configure(state="disabled")

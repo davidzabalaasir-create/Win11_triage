@@ -41,7 +41,7 @@ version = { attr = "win11_triage.__version__" }
 include = ["win11_triage*"]
 
 [tool.setuptools.package-data]
-win11_triage = ["samples/*", "assets/*", "rules/yara/*.yar", "rules/sigma/*.yml"]
+win11_triage = ["samples/*", "assets/*", "rules/yara/*.yar", "rules/sigma/*.yml", "remote/*.ps1"]
 
 [tool.ruff]
 line-length = 120
