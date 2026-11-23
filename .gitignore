@@ -2,6 +2,7 @@
 vt_cache.json
 vt_cache.tmp
 intel_cache.json
+hash_cache.json
 reportes/
 __pycache__/
 *.py[cod]

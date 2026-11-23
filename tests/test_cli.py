@@ -56,7 +56,7 @@ def test_dry_run_vt_limit_skips_queries(tmp_path):
     cli.main(["--dry-run", "--vt-limit", "1", "--config-dir", str(tmp_path), "--format", "json", "--no-color"])
     data = json.loads(next((tmp_path / "reportes").glob("*.json")).read_text(encoding="utf-8"))
     assert data["vt_stats"]["network"] == 1
-    assert data["vt_stats"]["skipped"] == 10
+    assert data["vt_stats"]["skipped"] == 9 and data["vt_stats"]["trusted"] == 1
 
 
 def test_missing_tools_exit_code(tmp_path, monkeypatch):

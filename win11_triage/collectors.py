@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import io
 import logging
 import os
@@ -11,6 +10,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
 
+from . import hashing
 from .models import Connection, Finding
 from .rules.heuristics import HIJACK_CATEGORIES, has_lolbin
 from .utils import expand_win_vars
@@ -19,6 +19,9 @@ log = logging.getLogger(__name__)
 
 # -nobanner: salida CSV pura. -s en sigcheck: recorre subcarpetas.
 AUTORUNS_ARGS = ["-accepteula", "-nobanner", "-a", "*", "-c", "-h", "-s"]
+# Modo rápido: sin códecs (c), gadgets (g), complementos de IE (i) ni Known DLLs (k), que son cientos
+# de entradas de Microsoft cuya firma hay que verificar y casi nunca aportan hallazgos.
+AUTORUNS_QUICK_CATEGORIES = "bdehlmnoprstw"
 SIGCHECK_ARGS = ["-accepteula", "-nobanner", "-u", "-e", "-c", "-h", "-s"]
 TCPVCON_ARGS = ["-accepteula", "-nobanner", "-c", "-n"]
 
@@ -67,15 +70,11 @@ def _clean(value: str) -> str:
 
 def sha256_file(path: str) -> str:
     """Calcula el SHA-256 si Sysinternals no lo dio (p. ej. sin acceso)."""
-    p = Path(expand_win_vars(path.strip('"')))
-    try:
-        h = hashlib.sha256()
-        with p.open("rb") as fh:
-            for chunk in iter(lambda: fh.read(1 << 20), b""):
-                h.update(chunk)
-        return h.hexdigest()
-    except OSError:
-        return ""
+    return hashing.active().sha256(_local_path(path))
+
+
+def _local_path(path: str) -> str:
+    return expand_win_vars(path.strip().strip('"'))
 
 
 def run_tool(exe: Path, args: list[str], timeout: int = DEFAULT_TIMEOUT) -> str:
@@ -140,8 +139,12 @@ def parse_autoruns(text: str) -> list[Finding]:
     return findings
 
 
-def collect_autoruns(exe: Path) -> list[Finding]:
-    findings = parse_autoruns(run_tool(exe, AUTORUNS_ARGS))
+def autoruns_args(quick: bool = False) -> list[str]:
+    return [a if not (quick and a == "*") else AUTORUNS_QUICK_CATEGORIES for a in AUTORUNS_ARGS]
+
+
+def collect_autoruns(exe: Path, quick: bool = False) -> list[Finding]:
+    findings = parse_autoruns(run_tool(exe, autoruns_args(quick)))
     _fill_missing_hashes(findings)
     return findings
 
@@ -182,9 +185,11 @@ def collect_sigcheck(exe: Path, folder: Path) -> list[Finding]:
 
 def _fill_missing_hashes(findings: list[Finding]) -> None:
     """Completa SHA-256 y fecha de creación del fichero cuando Sysinternals no los da."""
+    pending = [f for f in findings if not f.sha256 and f.path]
+    hashes = hashing.active().many(_local_path(f.path) for f in pending)  # en paralelo y con caché
+    for f in pending:
+        f.sha256 = hashes.get(_local_path(f.path), "")
     for f in findings:
-        if not f.sha256 and f.path:
-            f.sha256 = sha256_file(f.path)
         if not f.created and f.path:
             try:
                 ctime = os.path.getctime(expand_win_vars(f.path.strip('"')))

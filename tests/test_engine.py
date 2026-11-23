@@ -38,8 +38,12 @@ def test_engine_dry_run_reports_progress(tmp_path):
     res = TriageEngine(opts, _tools(), rec).run()
     assert res.modules == ["autoruns", "scan-user", "network", "vt"]
     assert res.counts()[Status.DETECTED] == 8
-    assert ("vt_start", 10, 0, 10) in rec.events
-    assert sum(1 for e in rec.events if e[0] == "vt_progress") == 10
+    # 10 hashes, pero uno es de un editor de confianza sin señales: no se gasta consulta en él
+    assert ("vt_start", 9, 0, 9) in rec.events
+    assert sum(1 for e in rec.events if e[0] == "vt_progress") == 9
+    assert res.vt_stats["trusted"] == 1
+    progress = [e for e in rec.events if e[0] == "vt_progress"]
+    assert progress[0][1] == 1  # se consulta primero lo de mayor puntuación
     assert any(e[0] == "info" and "conexiones" in e[1] for e in rec.events)
 
 
@@ -53,7 +57,7 @@ def test_engine_honours_cancel(tmp_path):
 
 def test_engine_skips_vt_without_key(tmp_path, monkeypatch):
     monkeypatch.delenv("VT_API_KEY", raising=False)
-    monkeypatch.setattr("win11_triage.collectors.collect_autoruns", lambda exe: [])
+    monkeypatch.setattr("win11_triage.collectors.collect_autoruns", lambda exe, **kw: [])
     tools = _tools()
     tools["autorunsc.exe"] = env_check.ToolStatus("autorunsc.exe", tmp_path / "autorunsc.exe", "PATH")
     res = TriageEngine(TriageOptions(autoruns=True, vt=True, config_dir=tmp_path), tools).run()

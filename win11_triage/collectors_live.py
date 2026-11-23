@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from .collectors import sha256_file
+from . import hashing
 from .models import Connection, Finding, Signal
 from .rules.heuristics import lolbin_cmdline, masquerading, process_lineage, user_writable_path
 
@@ -122,9 +122,12 @@ def process_findings(procs: dict[int, ProcInfo], compute_hashes: bool = True) ->
             f.signals.append(positive[-1])  # no la produce ninguna regla base: se conserva
         if not positive:
             continue
-        if compute_hashes and p.exe and not p.exe_missing:
-            f.sha256 = sha256_file(p.exe)
         out.append(f)
+    if compute_hashes:  # en paralelo y con caché, solo los procesos que se van a informar
+        targets = [f for f in out if f.path and not any(s.id == "PROC_IMAGE_MISSING" for s in f.signals)]
+        hashes = hashing.active().many(f.path for f in targets)
+        for f in targets:
+            f.sha256 = hashes.get(f.path, "")
     return out
 
 

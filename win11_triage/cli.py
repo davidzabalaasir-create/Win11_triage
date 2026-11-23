@@ -79,6 +79,16 @@ def build_parser() -> argparse.ArgumentParser:
     opt.add_argument(
         "--dry-run", action="store_true", help="usa datos de ejemplo: no ejecuta herramientas ni usa la red"
     )
+    opt.add_argument(
+        "--quick",
+        action="store_true",
+        help="análisis rápido: autorunsc sin códecs, gadgets, complementos de IE ni Known DLLs",
+    )
+    opt.add_argument(
+        "--vt-all",
+        action="store_true",
+        help="consulta en VirusTotal también lo firmado por editores de confianza sin señales",
+    )
     opt.add_argument("--vt-limit", type=int, metavar="N", help="máximo de consultas nuevas a VT en esta ejecución")
     opt.add_argument(
         "--config-dir",
@@ -182,6 +192,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         network=a.network,
         vt=a.vt,
         intel=a.intel,
+        quick=a.quick,
+        vt_all=a.vt_all,
         dry_run=a.dry_run,
         vt_limit=a.vt_limit,
         config_dir=a.config_dir,

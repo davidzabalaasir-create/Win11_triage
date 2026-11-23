@@ -162,7 +162,9 @@ win11-triage --all --lang en --format pdf        # resumen ejecutivo en inglés
 | Opción | Descripción |
 |---|---|
 | `--all` | Activa todos los módulos |
-| `--vt-limit N` | Máximo de consultas **nuevas** a VirusTotal (las de caché no cuentan) |
+| `--vt-limit N` | Máximo de consultas **nuevas** a VirusTotal (las de caché no cuentan); se consulta primero lo más grave |
+| `--vt-all` | Consulta también lo firmado por editores de confianza sin señales (por defecto se omite para ahorrar tiempo) |
+| `--quick` | Análisis rápido: autorunsc sin códecs, gadgets, complementos de IE ni Known DLLs (también el perfil «Rápido» de la app) |
 | `--format md\|html\|json\|pdf\|both\|all` | Formato del informe (`pdf` = resumen ejecutivo de una página, `both` = md + json, `all` = todos) |
 | `--explain` | «¿Qué hago con esto?» para los 5 elementos más graves |
 | `--lang es\|en` | Idioma de los informes y mensajes (también `WIN11_TRIAGE_LANG`) |

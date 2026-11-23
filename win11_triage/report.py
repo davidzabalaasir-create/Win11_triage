@@ -335,7 +335,9 @@ def render_markdown(r: TriageResult) -> str:
         s = r.vt_stats
         L.append(
             f"| VirusTotal | {s['network']} consultas nuevas · {s['cache']} desde caché · "
-            f"{s['errors']} errores · {s['skipped']} omitidas |"
+            f"{s['errors']} errores · {s['skipped']} omitidas"
+            + (f" · {s['trusted']} de confianza sin consultar" if s.get("trusted") else "")
+            + " |"
         )
     if r.intel_stats:
         s = r.intel_stats

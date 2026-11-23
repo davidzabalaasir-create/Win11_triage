@@ -10,17 +10,29 @@ from __future__ import annotations
 
 import getpass
 import json
+import logging
 import os
 import platform
 import sys
 import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import collectors, collectors_browsers, collectors_events, collectors_live, env_check, intel, remote, sigma
+from . import (
+    collectors,
+    collectors_browsers,
+    collectors_events,
+    collectors_live,
+    env_check,
+    hashing,
+    intel,
+    remote,
+    sigma,
+)
 from .enrich import eligible, file_of, pe_static, yara_scan
 from .models import Cancelled, Finding, Signal
 from .report import TriageResult
@@ -28,6 +40,7 @@ from .rules import apply_rules, apply_vt
 from .virustotal import FREE_TIER_INTERVAL, VTAuthError, VTClient, VTResult
 from .whitelist import Whitelist
 
+log = logging.getLogger(__name__)
 SAMPLES = Path(__file__).resolve().parent / "samples"
 PLACEHOLDER_KEY = "pon_aqui_tu_api_key"
 
@@ -37,6 +50,7 @@ SECTION_PROCESSES = "Procesos en ejecución — sospechosos"
 SECTION_EVENTS = "Eventos de Windows — servicios, tareas y Defender"
 SECTION_SIGMA = "Reglas Sigma — Sysmon, 4688, PowerShell"
 SECTION_BROWSERS = "Extensiones de navegador"
+MAX_PARALLEL = 4  # colectores a la vez (procesos externos + disco)
 REMOTE_MODULES = {"autoruns", "processes"}  # el resto necesita herramientas o ficheros locales
 
 
@@ -79,6 +93,8 @@ class TriageOptions:
     network: bool = False
     static: bool = False
     vt: bool = False
+    vt_all: bool = False  # consultar también lo firmado y sin señales
+    quick: bool = False  # autorunsc solo con las categorías de persistencia más usadas
     intel: bool = False
     dry_run: bool = False
     vt_limit: int | None = None
@@ -131,6 +147,43 @@ class Reporter:
     def vt_wait(self, remaining: float) -> None: ...
 
 
+class _ParallelReporter(Reporter):
+    """Envuelve el reporter mientras los colectores corren a la vez: serializa las llamadas y
+    muestra «(n de m terminados)» en vez de que cada módulo apague el indicador del otro."""
+
+    def __init__(self, inner: Reporter, total: int) -> None:
+        self.inner, self.total, self.count = inner, total, 0
+        self.lock = threading.Lock()
+
+    def finished(self) -> None:
+        with self.lock:
+            self.count += 1
+
+    def stage(self, text: str) -> None:
+        with self.lock:
+            self.inner.stage(f"{text}  ({self.count}/{self.total} módulos terminados)")
+
+    def done(self) -> None:  # lo apaga el motor cuando terminan todos
+        pass
+
+    def info(self, text: str) -> None:
+        with self.lock:
+            self.inner.info(text)
+
+    def warn(self, text: str) -> None:
+        with self.lock:
+            self.inner.warn(text)
+
+    def error(self, text: str) -> None:
+        with self.lock:
+            self.inner.error(text)
+
+
+def vt_worthy(f: Finding) -> bool:
+    """¿Merece gastar una consulta de VirusTotal? No, si tiene firma válida y nada sospechoso."""
+    return not (f.signed_ok and f.score < 30)
+
+
 # ----------------------------------------------------------------- dry-run
 def sample_text(name: str) -> str:
     return (SAMPLES / name).read_text(encoding="utf-8")
@@ -176,6 +229,18 @@ class TriageEngine:
 
     def run(self) -> TriageResult:
         """Ejecuta los módulos activos. Puede lanzar WhitelistError o Cancelled."""
+        cache_file = None if self.opts.dry_run else self.opts.config_dir / "hash_cache.json"  # type: ignore[operator]
+        cache = hashing.HashCache(cache_file)
+        previous = hashing.use(cache)
+        try:
+            return self._run()
+        finally:
+            cache.save()
+            hashing.use(previous)
+            if cache.hits or cache.misses:
+                log.debug("Caché de hashes: %d aciertos, %d calculados", cache.hits, cache.misses)
+
+    def _run(self) -> TriageResult:
         whitelist = Whitelist.load(self.opts.whitelist_file, create=not self.opts.dry_run)
         started = datetime.now()
         if self.opts.remote_host:
@@ -199,21 +264,17 @@ class TriageEngine:
             ("sigma", self.opts.sigma, SECTION_SIGMA, self._sigma),
             ("browsers", self.opts.browsers, SECTION_BROWSERS, self._browsers),
         )
+        jobs = []
         for module, enabled, section, fn in plan:
             if not enabled:
                 continue
             if rem and module not in REMOTE_MODULES:
                 self.r.warn(f"Módulo «{module}» no disponible en remoto: se omite.")
                 continue
-            self._check_cancel()
             res.modules.append(module)
-            try:
-                found = fn(res)
-            except collectors.CollectorError as e:
-                self._fail(res, str(e))
-                found = []
-            finally:
-                self.r.done()
+            jobs.append((section, fn))
+        self._check_cancel()
+        for section, found in self._run_collectors(res, jobs):
             found, skipped = whitelist.filter(found)
             res.whitelisted += skipped
             res.sections[section] = found
@@ -245,6 +306,42 @@ class TriageEngine:
         res.finished = datetime.now()
         return res
 
+    def _run_collectors(
+        self, res: TriageResult, jobs: list[tuple[str, Callable[[TriageResult], list[Finding]]]]
+    ) -> list[tuple[str, list[Finding]]]:
+        """Ejecuta los colectores a la vez: autorunsc, sigcheck, wevtutil y la lectura de perfiles
+        pasan casi todo el tiempo esperando a procesos externos o al disco, así que en paralelo el
+        análisis dura lo que el más lento y no la suma de todos. El orden de las secciones se mantiene."""
+
+        def one(fn: Callable[[TriageResult], list[Finding]]) -> list[Finding]:
+            self._check_cancel()
+            try:
+                return fn(res)
+            except collectors.CollectorError as e:
+                self._fail(res, str(e))
+                return []
+
+        if len(jobs) <= 1:
+            out = []
+            for section, fn in jobs:
+                self._check_cancel()
+                out.append((section, one(fn)))
+                self.r.done()
+            return out
+        real, self.r = self.r, _ParallelReporter(self.r, len(jobs))
+        try:
+            with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL, len(jobs)), thread_name_prefix="colector") as pool:
+                futures = [(section, pool.submit(one, fn)) for section, fn in jobs]
+                results = []
+                for section, fut in futures:
+                    results.append((section, fut.result()))
+                    self.r.finished()  # type: ignore[attr-defined]
+        finally:
+            self.r = real
+            real.done()
+        self._check_cancel()
+        return results
+
     def _fail(self, res: TriageResult, msg: str) -> None:
         res.errors.append(msg)
         self.r.error(msg)
@@ -274,22 +371,24 @@ class TriageEngine:
             raw = sample_text("autorunsc_sample.csv").encode("utf-16")  # mismo decodificador que el real
             return collectors.parse_autoruns(collectors.decode_output(raw))
         self.r.stage("Ejecutando autorunsc (puede tardar varios minutos)…")
-        return collectors.collect_autoruns(self.tools["autorunsc.exe"].path)  # type: ignore[arg-type]
+        return collectors.collect_autoruns(self.tools["autorunsc.exe"].path, quick=self.opts.quick)  # type: ignore[arg-type]
 
     def _sigcheck(self, res: TriageResult) -> list[Finding]:
         if self.opts.dry_run:
             return collectors.parse_sigcheck(sample_text("sigcheck_sample.csv"), "(muestra)")
-        found: list[Finding] = []
-        for folder in collectors.user_scan_targets():
+        folders = [f for f in collectors.user_scan_targets() if f.is_dir()]
+        self.r.stage(f"Ejecutando sigcheck sobre {len(folders)} carpeta(s) a la vez…")
+
+        def one(folder: Path) -> list[Finding]:
             self._check_cancel()
-            if not folder.is_dir():
-                continue
-            self.r.stage(f"Ejecutando sigcheck sobre {folder}…")
             try:
-                found += collectors.collect_sigcheck(self.tools["sigcheck.exe"].path, folder)  # type: ignore[arg-type]
+                return collectors.collect_sigcheck(self.tools["sigcheck.exe"].path, folder)  # type: ignore[arg-type]
             except collectors.CollectorError as e:
                 self._fail(res, str(e))
-        return found
+                return []
+
+        with ThreadPoolExecutor(max_workers=max(1, len(folders)), thread_name_prefix="sigcheck") as pool:
+            return [f for part in pool.map(one, folders) for f in part]
 
     def _snapshot(self) -> tuple[dict[int, collectors_live.ProcInfo], list]:
         """Procesos y conexiones (una sola captura compartida por --processes y --network)."""
@@ -434,23 +533,30 @@ class TriageEngine:
                 self._fail(res, f"YARA: no se pudieron compilar las reglas ({e})")
         else:
             self.r.warn('YARA no disponible (pip install "win11-triage[yara]"): solo análisis PE.')
-        seen: dict[Path, list[Signal]] = {}
-        analysed = 0
-        for i, f in enumerate(targets, 1):
+        files = {f.key: file_of(f) for f in targets}
+        unique = list(dict.fromkeys(p for p in files.values() if p is not None))
+        done = 0
+        lock = threading.Lock()
+
+        def analyse(path: Path) -> list[Signal]:
+            nonlocal done
             self._check_cancel()
-            path = file_of(f)
-            if path is None:
-                continue
-            if path not in seen:
-                self.r.stage(f"Analizando contenido {i}/{len(targets)}: {path.name}")
-                sigs = pe_static.pe_signals(path)
-                if scanner is not None:
-                    sigs += scanner.scan(path)
-                seen[path] = sigs
-                analysed += 1
-            f.signals += seen[path]
+            sigs = pe_static.pe_signals(path)
+            if scanner is not None:
+                sigs += scanner.scan(path)  # YARA libera el GIL: aquí el paralelo rinde de verdad
+            with lock:
+                done += 1
+                self.r.stage(f"Analizando contenido {done}/{len(unique)}: {path.name}")
+            return sigs
+
+        with ThreadPoolExecutor(max_workers=MAX_PARALLEL, thread_name_prefix="contenido") as pool:
+            seen = dict(zip(unique, pool.map(analyse, unique), strict=True))
+        for f in targets:
+            path = files[f.key]
+            if path is not None:
+                f.signals += seen[path]
         self.r.done()
-        self.r.info(f"Contenido: {analysed} fichero(s) analizados (PE{' + YARA' if scanner else ''}).")
+        self.r.info(f"Contenido: {len(unique)} fichero(s) analizados (PE{' + YARA' if scanner else ''}).")
 
     # --------------------------------------------------------- reputación
     def _intel(self, res: TriageResult) -> None:
@@ -496,8 +602,19 @@ class TriageEngine:
             on_notice=self.r.warn,
             cancel=self.cancel,
         )
-        hashes = sorted({f.sha256 for f in res.findings if f.sha256})
+        # Cada consulta nueva cuesta 15 s (plan gratuito): primero lo más grave, y lo firmado por un
+        # editor de confianza sin ninguna señal de riesgo no se consulta (salvo --vt-all).
+        best: dict[str, int] = {}
+        for f in res.findings:
+            if f.sha256 and (self.opts.vt_all or vt_worthy(f)):
+                best[f.sha256] = max(best.get(f.sha256, -1), f.score)
+        trusted = len({f.sha256 for f in res.findings if f.sha256} - set(best))
+        hashes = sorted(best, key=lambda h: (-best[h], h))
         pending = {h for h in hashes if not client.cached(h)}
+        if trusted:
+            self.r.info(
+                f"VirusTotal: {trusted} hash(es) firmados por editores de confianza sin señales no se consultan."
+            )
         limit = len(pending) if self.opts.vt_limit is None else min(self.opts.vt_limit, len(pending))
         self.r.vt_start(len(hashes), len(hashes) - len(pending), limit, max(0, limit - 1) * client.interval)
 
@@ -521,4 +638,4 @@ class TriageEngine:
             client.save()
             for f in res.findings:
                 f.vt = results.get(f.sha256, f.vt)
-            res.vt_stats = client.stats
+            res.vt_stats = {**client.stats, "trusted": trusted}

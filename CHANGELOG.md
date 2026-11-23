@@ -2,6 +2,20 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y [SemVer](https://semver.org/lang/es/).
 
+## [3.1.0] — 2026-11-23
+
+### Rendimiento
+- **Colectores en paralelo**: autorunsc, sigcheck, eventos, Sigma, navegadores y procesos se ejecutan a la vez (hasta 4). El análisis dura lo que el módulo más lento, no la suma de todos.
+- **wevtutil en paralelo**: los registros de eventos (Sistema, Seguridad, Defender, Sysmon, PowerShell) se consultan a la vez.
+- **Caché persistente de hashes** (`hash_cache.json`): si un fichero no ha cambiado (ruta, tamaño y fecha), no se vuelve a leer. Los nuevos se calculan en paralelo (≈3,5× más rápido; con caché, casi instantáneo).
+- **Motor Sigma compilado**: cada regla se compila una vez y cada evento se prepara una sola vez; las reglas se indexan por tipo de evento (≈4× más rápido: 20 000 eventos en 0,19 s frente a 0,76 s).
+- **Análisis de contenido (PE/YARA) en paralelo**.
+- **Reputación (AbuseIPDB/MalwareBazaar)**: varias consultas a la vez; la primera de cada servicio va sola para no insistir si la clave es mala.
+- **Historial en caché**: refrescar la lista con 150 informes pasa de ≈140 ms a ≈1 ms.
+- **VirusTotal más rápido**: lo firmado por un editor de confianza y sin ninguna señal ya no gasta consulta (15 s cada una en el plan gratuito), y se consulta primero lo de mayor puntuación, así `--vt-limit` aprovecha mejor las consultas. `--vt-all` vuelve a consultarlo todo.
+- **sigcheck** analiza Temp y AppData a la vez.
+- **Modo rápido** (`--quick` o perfil «Rápido» en la app): autorunsc sin códecs, gadgets, complementos de IE ni Known DLLs.
+
 ## [3.0.0] — 2026-11-23
 
 ### Añadido
