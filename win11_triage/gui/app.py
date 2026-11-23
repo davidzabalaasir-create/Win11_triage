@@ -948,6 +948,7 @@ class TriageApp(ctk.CTk):
             network=m["network"],
             static=m["static"],
             vt=m["vt"],
+            intel=m.get("intel", False),
             dry_run=self.var_dry.get(),
             vt_limit=int(raw) if raw else None,
             event_days=int(self.var_days.get() or 7),

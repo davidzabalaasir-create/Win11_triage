@@ -30,6 +30,7 @@ GROUPS = (
             ("network", "Conexiones de red", "Qué proceso sospechoso habla con el exterior"),
             ("static", "Análisis de contenido", "Empaquetadores, imports de inyección, YARA"),
             ("vt", "VirusTotal", "Reputación de cada hash (15 s por consulta nueva)"),
+            ("intel", "AbuseIPDB y MalwareBazaar", "Reputación de IPs remotas y hashes conocidos"),
         ),
     ),
 )

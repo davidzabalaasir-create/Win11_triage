@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import collectors, collectors_events, collectors_live, env_check, sigma
+from . import collectors, collectors_events, collectors_live, env_check, intel, sigma
 from .enrich import eligible, file_of, pe_static, yara_scan
 from .models import Cancelled, Finding, Signal
 from .report import TriageResult
@@ -76,6 +76,7 @@ class TriageOptions:
     network: bool = False
     static: bool = False
     vt: bool = False
+    intel: bool = False
     dry_run: bool = False
     vt_limit: int | None = None
     event_days: int = 7
@@ -84,7 +85,7 @@ class TriageOptions:
     def __post_init__(self) -> None:
         self.config_dir = (self.config_dir or default_config_dir()).resolve()
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        if (self.vt or self.network or self.static) and not self.any_collector:
+        if (self.vt or self.network or self.static or self.intel) and not self.any_collector:
             self.autoruns = self.scan_user = True  # necesitan hallazgos de los que partir
 
     @property
@@ -216,6 +217,10 @@ class TriageEngine:
             res.modules.append("vt")
             self._vt(res)
         apply_vt(res.findings)
+        if self.opts.intel:
+            self._check_cancel()
+            res.modules.append("intel")
+            self._intel(res)
         if self._procs is not None:
             self._record_process_tree(res)
         res.finished = datetime.now()
@@ -391,6 +396,31 @@ class TriageEngine:
             f.signals += seen[path]
         self.r.done()
         self.r.info(f"Contenido: {analysed} fichero(s) analizados (PE{' + YARA' if scanner else ''}).")
+
+    # --------------------------------------------------------- reputación
+    def _intel(self, res: TriageResult) -> None:
+        self.r.stage("Consultando reputación (AbuseIPDB, MalwareBazaar)…")
+        if self.opts.dry_run:
+            known = {h for h, v in _sample_json("vt_responses.json").items() if isinstance(v, dict) and v.get("label")}
+            ip_lookup, hash_lookup = intel.demo_ip_lookup, intel.demo_hash_lookup(known)
+        else:
+            abuse = os.environ.get("ABUSEIPDB_API_KEY", "").strip()
+            mb = os.environ.get("MALWAREBAZAAR_API_KEY", "").strip()
+            ip_lookup = intel.abuseipdb_lookup(abuse) if abuse else None
+            hash_lookup = intel.malwarebazaar_lookup(mb) if mb else None
+            if not (abuse or mb):
+                msg = "Ni ABUSEIPDB_API_KEY ni MALWAREBAZAAR_API_KEY configuradas: se omite la reputación."
+                res.errors.append(msg)
+                self.r.warn(msg)
+                return
+        cache = intel.IntelCache(self.opts.config_dir / "intel_cache.json", persist=not self.opts.dry_run)  # type: ignore[operator]
+        stats = intel.enrich(res.findings, ip_lookup, hash_lookup, cache, on_warn=self.r.warn)
+        res.intel_stats = stats
+        self.r.done()
+        self.r.info(
+            f"Reputación: {stats['ips']} IP ({stats['ip_bad']} maliciosas) · {stats['hashes']} hashes "
+            f"({stats['hash_known']} conocidos en MalwareBazaar) · {stats['cache']} desde caché."
+        )
 
     # --------------------------------------------------------- VirusTotal
     def _vt(self, res: TriageResult) -> None:

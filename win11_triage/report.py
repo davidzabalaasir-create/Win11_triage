@@ -31,6 +31,7 @@ class TriageResult:
     connections: list[Connection] = field(default_factory=list)
     whitelisted: int = 0
     vt_stats: dict[str, int] | None = None
+    intel_stats: dict[str, int] | None = None
     errors: list[str] = field(default_factory=list)
     finished: datetime | None = None
     reviews: dict[str, dict[str, Any]] = field(default_factory=dict)  # Finding.key → {state, note}
@@ -333,6 +334,12 @@ def render_markdown(r: TriageResult) -> str:
             f"| VirusTotal | {s['network']} consultas nuevas · {s['cache']} desde caché · "
             f"{s['errors']} errores · {s['skipped']} omitidas |"
         )
+    if r.intel_stats:
+        s = r.intel_stats
+        L.append(
+            f"| Reputación | {s['ips']} IP ({s['ip_bad']} maliciosas) · {s['hashes']} hashes "
+            f"({s['hash_known']} en MalwareBazaar) |"
+        )
     L.append(f"| Versión | win11-triage {__version__} |")
     L.append("")
 
@@ -473,6 +480,7 @@ def to_json(r: TriageResult) -> dict[str, Any]:
         "priority": [f"{f.source}:{f.name}" for f in top_findings(r.findings)],
         "whitelisted": r.whitelisted,
         "vt_stats": r.vt_stats,
+        "intel_stats": r.intel_stats,
         "errors": r.errors,
         "sections": {title: [f.to_dict() for f in sort_findings(fs)] for title, fs in r.sections.items()},
         "findings": [_with_review(r, f) for f in sort_findings(r.findings)],
@@ -513,6 +521,7 @@ def load_json(path: Path) -> TriageResult:
         modules=list(data.get("modules") or []),
         whitelisted=int(data.get("whitelisted") or 0),
         vt_stats=data.get("vt_stats"),
+        intel_stats=data.get("intel_stats"),
         errors=list(data.get("errors") or []),
         finished=datetime.fromisoformat(finished) if finished else None,
         processes=list(data.get("process_tree") or []),

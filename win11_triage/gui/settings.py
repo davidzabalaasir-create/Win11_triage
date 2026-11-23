@@ -14,6 +14,7 @@ DEFAULTS: dict[str, Any] = {
         "processes": True,
         "events": True,
         "sigma": True,
+        "intel": False,
         "network": True,
         "static": True,
         "vt": True,
