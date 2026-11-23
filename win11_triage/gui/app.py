@@ -944,6 +944,7 @@ class TriageApp(ctk.CTk):
             scan_user=m["scan_user"],
             processes=m["processes"],
             events=m["events"],
+            sigma=m.get("sigma", False),
             network=m["network"],
             static=m["static"],
             vt=m["vt"],

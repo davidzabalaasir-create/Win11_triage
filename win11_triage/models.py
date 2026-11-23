@@ -62,7 +62,7 @@ class Connection:
 
 @dataclass
 class Finding:
-    source: str  # "autoruns" | "sigcheck" | "process" | "event"
+    source: str  # "autoruns" | "sigcheck" | "process" | "event" | "sigma"
     name: str
     path: str
     publisher: str
@@ -110,6 +110,8 @@ class Finding:
     def key(self) -> str:
         """Identidad estable entre ejecuciones (historial, comparación y revisiones)."""
         ident = (self.path or self.name).strip().strip('"').lower()
+        if self.source == "sigma":
+            ident = f"{self.name.lower()}|{ident}"
         return f"{self.source}|{ident}|{(self.sha256 or '').lower()}"
 
     @property

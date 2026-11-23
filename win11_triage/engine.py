@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import collectors, collectors_events, collectors_live, env_check
+from . import collectors, collectors_events, collectors_live, env_check, sigma
 from .enrich import eligible, file_of, pe_static, yara_scan
 from .models import Cancelled, Finding, Signal
 from .report import TriageResult
@@ -35,6 +35,7 @@ SECTION_AUTORUNS = "Persistencia (Autoruns)"
 SECTION_SIGCHECK = "Carpetas de usuario (Sigcheck) — sin firma válida"
 SECTION_PROCESSES = "Procesos en ejecución — sospechosos"
 SECTION_EVENTS = "Eventos de Windows — servicios, tareas y Defender"
+SECTION_SIGMA = "Reglas Sigma — Sysmon, 4688, PowerShell"
 
 
 APP_NAME = "win11-triage"
@@ -71,6 +72,7 @@ class TriageOptions:
     scan_user: bool = False
     processes: bool = False
     events: bool = False
+    sigma: bool = False
     network: bool = False
     static: bool = False
     vt: bool = False
@@ -87,7 +89,7 @@ class TriageOptions:
 
     @property
     def any_collector(self) -> bool:
-        return self.autoruns or self.scan_user or self.processes or self.events
+        return self.autoruns or self.scan_user or self.processes or self.events or self.sigma
 
     @property
     def required_tools(self) -> set[str]:
@@ -180,6 +182,7 @@ class TriageEngine:
             ("scan-user", self.opts.scan_user, SECTION_SIGCHECK, self._sigcheck),
             ("processes", self.opts.processes, SECTION_PROCESSES, self._processes),
             ("events", self.opts.events, SECTION_EVENTS, self._events),
+            ("sigma", self.opts.sigma, SECTION_SIGMA, self._sigma),
         )
         for module, enabled, section, fn in plan:
             if not enabled:
@@ -296,6 +299,23 @@ class TriageEngine:
                 res.errors.append(w)
                 self.r.warn(w)
         self.r.info(f"Eventos: {len(found)} relevantes (servicios, tareas, Defender).")
+        return found
+
+    def _sigma(self, res: TriageResult) -> list[Finding]:
+        self.r.stage("Aplicando reglas Sigma a los eventos…")
+        rules, warnings = sigma.load_rules(self.opts.config_dir / "sigma")  # type: ignore[operator]
+        if self.opts.dry_run:
+            events = collectors_events.parse_events(sample_text("sysmon_sample.xml"))
+            have_sysmon = True
+        else:
+            events, more, have_sysmon = collectors_events.collect_raw_events(self.opts.event_days)
+            warnings += more
+        for w in warnings:
+            res.errors.append(w)
+            self.r.warn(w)
+        found = sigma.scan_events(events, rules)
+        src = "Sysmon + Windows" if have_sysmon else "Windows (sin Sysmon)"
+        self.r.info(f"Sigma: {len(rules)} reglas sobre {len(events)} eventos ({src}) → {len(found)} coincidencias.")
         return found
 
     # --------------------------------------------------------- red

@@ -40,6 +40,15 @@ TECHNIQUES: dict[str, str] = {
     "T1547.010": "Port Monitors",
     "T1556.008": "Network Provider DLL",
     "T1564.003": "Hidden Window",
+    "T1003.001": "LSASS Memory",
+    "T1003.002": "Security Account Manager",
+    "T1059": "Command and Scripting Interpreter",
+    "T1071.001": "Web Protocols",
+    "T1490": "Inhibit System Recovery",
+    "T1562.001": "Disable or Modify Tools",
+    "T1567": "Exfiltration Over Web Service",
+    "T1569.002": "Service Execution",
+    "T1572": "Protocol Tunneling",
 }
 
 # Categoría de autorunsc → (técnica, peso base). Lo infrecuente en un PC pesa más.

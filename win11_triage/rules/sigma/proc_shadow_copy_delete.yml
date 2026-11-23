@@ -1,0 +1,16 @@
+title: Borrado de copias de seguridad (preparación de ransomware)
+id: w11t-shadow-delete
+status: stable
+description: vssadmin, wmic, wbadmin o bcdedit usados para borrar instantáneas o desactivar la recuperación.
+author: David
+tags: [attack.impact, attack.t1490]
+logsource: {product: windows, category: process_creation}
+detection:
+  vss:
+    CommandLine|contains|all: ['shadow', 'delete']
+  wbadmin:
+    CommandLine|contains|all: ['wbadmin', 'delete']
+  bcd:
+    CommandLine|contains: ['recoveryenabled no', 'bootstatuspolicy ignoreallfailures']
+  condition: 1 of them
+level: critical

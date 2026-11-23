@@ -1,0 +1,12 @@
+title: Consulta DNS a servicios de túnel o dominios de alto riesgo
+id: w11t-dns-tunnel
+status: stable
+description: Resolución de dominios de túneles (ngrok, trycloudflare) o de pegado de código usados para C2 o exfiltración.
+author: David
+tags: [attack.command_and_control, attack.t1572, attack.exfiltration, attack.t1567]
+logsource: {product: windows, category: dns_query}
+detection:
+  sel:
+    QueryName|endswith: ['.ngrok.io', '.ngrok-free.app', '.trycloudflare.com', 'pastebin.com', 'transfer.sh', '.duckdns.org']
+  condition: sel
+level: medium

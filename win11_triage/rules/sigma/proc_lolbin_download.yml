@@ -1,0 +1,19 @@
+title: Binario del sistema usado para descargar o ejecutar código
+id: w11t-lolbin-download
+status: stable
+description: certutil, bitsadmin, mshta, regsvr32 o rundll32 con URLs o scripts remotos (Living off the Land).
+author: David
+tags: [attack.defense_evasion, attack.t1218, attack.command_and_control, attack.t1105]
+logsource: {product: windows, category: process_creation}
+detection:
+  certutil:
+    Image|endswith: '\certutil.exe'
+    CommandLine|contains: ['urlcache', '-decode', 'verifyctl']
+  bits:
+    Image|endswith: '\bitsadmin.exe'
+    CommandLine|contains: ['/transfer', '/addfile']
+  script_host:
+    Image|endswith: ['\mshta.exe', '\regsvr32.exe', '\rundll32.exe']
+    CommandLine|contains: ['http://', 'https://', 'javascript:', 'scrobj.dll']
+  condition: 1 of them
+level: high

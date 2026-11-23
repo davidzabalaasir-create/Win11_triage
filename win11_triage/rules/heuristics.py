@@ -167,7 +167,7 @@ def _clean_path(f: Finding) -> str:
 
 # --------------------------------------------------------------------------- reglas
 def signature(f: Finding) -> Iterable[Signal]:
-    if f.source in ("process", "event"):
+    if f.source in ("process", "event", "sigma"):
         return []  # en estos orígenes no se verificó la firma
     sig = f.signature.lower()
     abused = f.category.strip().lower() in HIJACK_CATEGORIES or has_lolbin(f"{f.path} {f.cmdline}")

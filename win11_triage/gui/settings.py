@@ -13,6 +13,7 @@ DEFAULTS: dict[str, Any] = {
         "scan_user": True,
         "processes": True,
         "events": True,
+        "sigma": True,
         "network": True,
         "static": True,
         "vt": True,

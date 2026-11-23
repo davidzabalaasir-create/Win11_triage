@@ -30,6 +30,16 @@ LOGS: list[tuple[str, tuple[int, ...]]] = [
 ]
 
 
+# Fuentes para las reglas Sigma: Sysmon (si está instalado), creación de procesos con línea de
+# comandos (4688 con la auditoría activada), Script Block Logging de PowerShell y servicios.
+SIGMA_LOGS: list[tuple[str, tuple[int, ...]]] = [
+    ("Microsoft-Windows-Sysmon/Operational", (1, 3, 11, 12, 13, 14, 22)),
+    ("Security", (4688,)),
+    ("Microsoft-Windows-PowerShell/Operational", (4104,)),
+    ("System", (7045,)),
+]
+
+
 @dataclass
 class Event:
     log: str
@@ -189,3 +199,22 @@ def collect_events(days: int) -> tuple[list[Finding], list[str]]:
             continue
         findings += [f for f in map(event_to_finding, events) if f]
     return findings, warnings
+
+
+def collect_raw_events(days: int, max_events: int = 2000) -> tuple[list[Event], list[str], bool]:
+    """Eventos en bruto para Sigma: (eventos, avisos, ¿Sysmon disponible?)."""
+    events: list[Event] = []
+    warnings: list[str] = []
+    sysmon = False
+    for log, ids in SIGMA_LOGS:
+        try:
+            got = parse_events(query_log(log, ids, days, max_events))
+        except (RuntimeError, OSError, subprocess.TimeoutExpired, ET.ParseError) as e:
+            if "Sysmon" in log:
+                warnings.append("Sysmon no está instalado o su registro no es accesible: solo se usan 4688/4104/7045.")
+            else:
+                warnings.append(f"Eventos de «{log}» no disponibles para Sigma: {e}")
+            continue
+        sysmon = sysmon or "Sysmon" in log
+        events += got
+    return events, warnings, sysmon

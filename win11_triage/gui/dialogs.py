@@ -21,6 +21,7 @@ GROUPS = (
             ("scan_user", "Carpetas de usuario", "Ejecutables sin firma en Temp y AppData"),
             ("processes", "Procesos en ejecución", "Rutas raras, suplantación, Office → consola"),
             ("events", "Eventos de Windows", "Servicios y tareas nuevos, detecciones de Defender"),
+            ("sigma", "Reglas Sigma", "Sysmon, PowerShell y procesos (4688) con reglas Sigma"),
         ),
     ),
     (

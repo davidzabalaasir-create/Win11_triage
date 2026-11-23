@@ -200,7 +200,13 @@ def write_evidence_zip(r: TriageResult, path: Path, new_keys: set[str] | None = 
     return path
 
 
-SOURCE_LABEL = {"autoruns": "Persistencia", "sigcheck": "Carpeta usuario", "process": "Proceso", "event": "Evento"}
+SOURCE_LABEL = {
+    "autoruns": "Persistencia",
+    "sigcheck": "Carpeta usuario",
+    "process": "Proceso",
+    "event": "Evento",
+    "sigma": "Sigma",
+}
 
 
 # ------------------------------------------------------------------ Rich

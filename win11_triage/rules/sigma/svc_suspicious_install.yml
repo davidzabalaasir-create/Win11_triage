@@ -1,0 +1,14 @@
+title: Servicio instalado con intérprete o en carpeta de usuario
+id: w11t-svc-suspicious
+status: stable
+description: Evento 7045 con un servicio cuyo binario es un intérprete, usa %COMSPEC% o vive en una carpeta de usuario (PsExec, Cobalt Strike…).
+author: David
+tags: [attack.persistence, attack.t1543.003, attack.lateral_movement, attack.t1569.002]
+logsource: {product: windows, service: system}
+detection:
+  sel:
+    EventID: 7045
+  bad:
+    ImagePath|contains: ['powershell', 'cmd.exe /c', '%comspec%', '\appdata\', '\temp\', '\users\public\', 'mshta', 'rundll32']
+  condition: sel and bad
+level: high
