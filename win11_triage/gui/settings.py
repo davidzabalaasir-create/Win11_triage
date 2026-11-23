@@ -21,6 +21,7 @@ DEFAULTS: dict[str, Any] = {
     "vt_limit": "",
     "format": "HTML",
     "geometry": "",
+    "appearance": "Oscuro",
 }
 
 
@@ -32,7 +33,7 @@ def load(config_dir: Path) -> dict[str, Any]:
         return data
     if isinstance(stored, dict):
         data["modules"].update({k: bool(v) for k, v in stored.get("modules", {}).items() if k in data["modules"]})
-        for key in ("event_days", "vt_limit", "format", "geometry"):
+        for key in ("event_days", "vt_limit", "format", "geometry", "appearance"):
             if key in stored:
                 data[key] = stored[key]
     return data

@@ -2,6 +2,19 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y [SemVer](https://semver.org/lang/es/).
 
+## [2.1.0] — 2026-11-23
+
+### Cambiado
+- **Rediseño completo de la interfaz**:
+  - sistema de diseño con tokens de color (claro y oscuro), escala tipográfica (Segoe UI Variable, Cascadia Mono para rutas y hashes), rejilla de 4 px e iconos Segoe Fluent con alternativa Unicode;
+  - barra lateral de navegación (Inicio, Hallazgos, Red, Historial, Ajustes) en lugar de la barra lateral saturada;
+  - diálogo **Nuevo análisis** con perfiles y módulos agrupados;
+  - **panel de detalle lateral** con el porqué de cada señal;
+  - tabla con punto de estado (sin colorear filas enteras), chips de filtro con contador y rutas abreviadas por el centro;
+  - KPIs con tendencia, estado vacío con acceso a la demostración, barra de estado con el entorno y registro plegable;
+  - **tema claro, oscuro o del sistema**.
+- **Microinteracciones**: «Deshacer» al ignorar elementos, confirmación en el botón al copiar, avisos con acción y el botón Analizar que se convierte en Cancelar.
+
 ## [2.0.0] — 2026-11-22
 
 ### Añadido

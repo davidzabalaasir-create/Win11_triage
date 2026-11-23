@@ -87,28 +87,36 @@ Desde la interfaz, en **«Clave de VirusTotal…»**. A mano: `copy .env.example
 ## Interfaz gráfica
 
 ```powershell
-win11-triage-gui          # o: win11-triage --gui · o doble clic en win11-triage-gui.pyw
+win11-triage-gui          # o: win11-triage --gui · o desde el menú Inicio si usaste el instalador
 ```
 
-![Hallazgos con el porqué de cada uno](docs/gui_hallazgos.png)
+![Hallazgos con el panel de detalle](docs/gui_hallazgos.png)
 
-- **Panel**:
-  - distribución de veredictos y puntuación máxima;
-  - elementos sospechosos por origen;
-  - técnicas ATT&CK observadas;
-  - **«Prioriza esto primero»** (doble clic para saltar al elemento).
-- **Hallazgos**:
-  - filtros, búsqueda (por nombre, ruta, hash o técnica, como `T1059.001`) y orden por columnas;
-  - interruptor **«Solo nuevos»**;
-  - panel **«Por qué»** con cada señal, su peso, su técnica y la evidencia;
-  - acciones: VirusTotal, ATT&CK, copiar hash, ruta o línea de comandos, Explorador e ignorar ruta o hash (también con clic derecho).
-- **Conexiones**: conexiones externas de los procesos señalados. Permite buscar la IP en VirusTotal o copiarla.
-- **Historial**: análisis anteriores. Puedes recargar cualquiera y la tarjeta **«Nuevos»** marca lo que ha aparecido desde el análisis anterior.
-- **Exportar**: CSV de la vista actual (se abre en Excel), HTML, Markdown o JSON.
-- **Perfiles**: **Rápido** o **Completo**. La interfaz recuerda tus preferencias.
-- **Atajos**: `Ctrl+R` analizar · `Esc` cancelar · `Ctrl+F` buscar · `Ctrl+E` exportar CSV · `Ctrl+O` abrir informe · `Ctrl+1…5` pestañas · `F5` volver a comprobar las herramientas.
+| Zona | Qué hay |
+|---|---|
+| **Barra lateral** | Inicio · Hallazgos · Red · Historial · Ajustes, con contadores. |
+| **Barra superior** | Título de la página, búsqueda (nombre, ruta, hash o técnica como `T1059.001`), Exportar y el botón principal **Analizar**, que se convierte en **Cancelar** mientras analiza. |
+| **Nuevo análisis** | Perfiles **Rápido**, **Completo** o **Personalizado**; módulos agrupados en *Recolección* y *Enriquecimiento*; días de eventos, límite de VirusTotal, formato del informe y modo demostración. Recuerda la última configuración. |
+| **Inicio** | KPIs con la tendencia frente al análisis anterior, «Prioriza esto primero», puntuación máxima, técnicas ATT&CK y distribución. |
+| **Hallazgos** | Filtros con contador, «Solo nuevos», tabla ordenable y **panel de detalle lateral**. El panel muestra el porqué con el peso y la evidencia de cada señal, y los datos del archivo, la ejecución, la red y VirusTotal. |
+| **Ajustes** | Clave de VirusTotal, apariencia (Sistema / Claro / Oscuro), herramientas (con instalación por winget), lista blanca, reglas YARA y carpetas. |
+| **Barra de estado** | Estado del entorno (administrador, Sysinternals, VirusTotal), progreso y el **Registro** plegable (`Ctrl+L`). |
 
-El análisis corre en segundo plano y se puede **cancelar** en cualquier momento.
+**Detalles de uso:**
+- Ignorar una ruta o un hash se aplica al momento y se puede **deshacer** desde el aviso.
+- Copiar un hash confirma en el propio botón.
+- Al terminar un análisis aparece un aviso con acceso directo a lo detectado.
+
+**Atajos:**
+- `Ctrl+N` nuevo análisis · `Ctrl+R` repetir el último · `Esc` cancelar
+- `Ctrl+F` buscar · `Ctrl+E` exportar CSV · `Ctrl+O` abrir informe
+- `Ctrl+1…5` páginas · `F5` volver a comprobar las herramientas
+
+<details><summary>Tema claro</summary>
+
+![Tema claro](docs/gui_claro.png)
+
+</details>
 
 ## Línea de comandos
 

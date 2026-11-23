@@ -68,25 +68,28 @@ def test_detail_shows_signals(app):
     first = app.tree.get_children()[0]
     app.tree.selection_set(first)
     app.update()
-    text = app.detail_box.get("1.0", "end")
-    assert "Por qué:" in text and "score" in text
+    text = app.detail_text()
+    assert "Por qué:" in text and "score" in text and "SHA-256:" in text
 
 
-def test_export_csv_and_whitelist(app, tmp_path, monkeypatch):
-    from win11_triage.gui import app as gui_app
-
+def test_export_csv_and_whitelist(app, tmp_path):
     _run(app)
     out = app.export_csv(tmp_path / "vista.csv")
     rows = list(csv.reader(out.open(encoding="utf-8-sig"), delimiter=";"))
     assert rows[0][:3] == ["estado", "score", "origen"] and len(rows) == 16
 
-    monkeypatch.setattr(gui_app.messagebox, "askyesno", lambda *a, **k: True)
     before = len(app.findings)
     app.tree.selection_set(app.tree.get_children()[0])
     app.update()
     app.whitelist_selected(by_hash=False)
     assert (tmp_path / "whitelist.json").exists()
     assert len(app.findings) < before
+    # «Deshacer» desde el toast restaura el elemento y lo quita de la lista blanca
+    toast_frame = next(w for w in app.place_slaves() if getattr(w, "_is_toast", False))
+    buttons = [w for w in toast_frame.winfo_children() if isinstance(w, ctk.CTkButton)]
+    undo_btn = next(b for b in buttons if "Deshacer" in b.cget("text"))
+    undo_btn.invoke()
+    assert len(app.findings) == before
 
 
 def test_history_reload_and_presets(app):
@@ -98,3 +101,28 @@ def test_history_reload_and_presets(app):
     assert app.result is not None and "historial" in app.subtitle.cget("text")
     app.apply_preset("Rápido")
     assert app.module_vars["processes"].get() and not app.module_vars["vt"].get()
+
+
+def test_pages_theme_and_new_scan_dialog(app):
+    from win11_triage.gui.dialogs import NewScanDialog
+
+    for page in ("home", "findings", "network", "history", "settings"):
+        app.show_page(page)
+        app.update()
+        assert app.page_title.cget("text")
+    app.set_appearance("Claro")
+    app.update()
+    app.set_appearance("Oscuro")
+    dlg = NewScanDialog(app)
+    app.update()
+    dlg.profile.set("Rápido")
+    dlg._apply_profile("Rápido")
+    assert app.module_vars["processes"].get() and not app.module_vars["vt"].get()
+    dlg.destroy()
+
+
+def test_empty_state_and_demo_button(app):
+    assert app.home_empty.winfo_manager() == "grid"
+    app.start_demo()
+    _pump_until(app, lambda: app.result is not None and not app.worker.is_alive())
+    assert app.home_empty.winfo_manager() == ""
