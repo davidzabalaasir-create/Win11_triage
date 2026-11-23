@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import collectors, collectors_events, collectors_live, env_check, intel, sigma
+from . import collectors, collectors_browsers, collectors_events, collectors_live, env_check, intel, sigma
 from .enrich import eligible, file_of, pe_static, yara_scan
 from .models import Cancelled, Finding, Signal
 from .report import TriageResult
@@ -36,6 +36,7 @@ SECTION_SIGCHECK = "Carpetas de usuario (Sigcheck) — sin firma válida"
 SECTION_PROCESSES = "Procesos en ejecución — sospechosos"
 SECTION_EVENTS = "Eventos de Windows — servicios, tareas y Defender"
 SECTION_SIGMA = "Reglas Sigma — Sysmon, 4688, PowerShell"
+SECTION_BROWSERS = "Extensiones de navegador"
 
 
 APP_NAME = "win11-triage"
@@ -73,6 +74,7 @@ class TriageOptions:
     processes: bool = False
     events: bool = False
     sigma: bool = False
+    browsers: bool = False
     network: bool = False
     static: bool = False
     vt: bool = False
@@ -90,7 +92,7 @@ class TriageOptions:
 
     @property
     def any_collector(self) -> bool:
-        return self.autoruns or self.scan_user or self.processes or self.events or self.sigma
+        return self.autoruns or self.scan_user or self.processes or self.events or self.sigma or self.browsers
 
     @property
     def required_tools(self) -> set[str]:
@@ -184,6 +186,7 @@ class TriageEngine:
             ("processes", self.opts.processes, SECTION_PROCESSES, self._processes),
             ("events", self.opts.events, SECTION_EVENTS, self._events),
             ("sigma", self.opts.sigma, SECTION_SIGMA, self._sigma),
+            ("browsers", self.opts.browsers, SECTION_BROWSERS, self._browsers),
         )
         for module, enabled, section, fn in plan:
             if not enabled:
@@ -321,6 +324,16 @@ class TriageEngine:
         found = sigma.scan_events(events, rules)
         src = "Sysmon + Windows" if have_sysmon else "Windows (sin Sysmon)"
         self.r.info(f"Sigma: {len(rules)} reglas sobre {len(events)} eventos ({src}) → {len(found)} coincidencias.")
+        return found
+
+    def _browsers(self, res: TriageResult) -> list[Finding]:
+        self.r.stage("Revisando extensiones de Chrome, Edge, Brave y Firefox…")
+        if self.opts.dry_run:
+            exts = _sample_json("browsers_sample.json")["extensions"]
+        else:
+            exts = collectors_browsers.collect_extensions()
+        found = collectors_browsers.extension_findings(exts)
+        self.r.info(f"Navegadores: {len(exts)} extensiones · {len(found)} con permisos u origen a revisar.")
         return found
 
     # --------------------------------------------------------- red

@@ -54,6 +54,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="aplica reglas Sigma a Sysmon, 4688, PowerShell 4104 y 7045 (usa los días de --events)",
     )
+    mod.add_argument(
+        "--browsers", action="store_true", help="extensiones de Chrome, Edge, Brave y Firefox (permisos y origen)"
+    )
     mod.add_argument("--network", action="store_true", help="conexiones activas por PID (psutil; tcpvcon de respaldo)")
     mod.add_argument(
         "--static", action="store_true", help="análisis de contenido: PE (pefile) y YARA si está instalado"
@@ -114,7 +117,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     a = p.parse_args(argv)
     if a.vt_limit is not None and a.vt_limit < 0:
         p.error("--vt-limit debe ser >= 0")
-    modules = ("autoruns", "scan_user", "processes", "sigma", "network", "static", "vt", "intel")
+    modules = ("autoruns", "scan_user", "processes", "sigma", "browsers", "network", "static", "vt", "intel")
     if a.all or (a.dry_run and not any(getattr(a, m) for m in modules) and a.events is None):
         for m in modules:
             setattr(a, m, True)
@@ -125,6 +128,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         processes=a.processes,
         events=a.events is not None,
         sigma=a.sigma,
+        browsers=a.browsers,
         event_days=a.events or 7,
         static=a.static,
         network=a.network,
@@ -256,7 +260,7 @@ def run(args: argparse.Namespace) -> int:
 
     if not opts.any_collector:
         console.print(
-            "\nElige módulos: [bold]--autoruns --scan-user --processes --events --sigma --network --static --vt --intel[/] "
+            "\nElige módulos: [bold]--autoruns --scan-user --processes --events --sigma --browsers --network --static --vt --intel[/] "
             "o [bold]--all[/]. También: [bold]--gui[/] (ayuda: --help)."
         )
         return EXIT_OK if env_ok else EXIT_ENV

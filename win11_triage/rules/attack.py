@@ -40,6 +40,7 @@ TECHNIQUES: dict[str, str] = {
     "T1547.010": "Port Monitors",
     "T1556.008": "Network Provider DLL",
     "T1564.003": "Hidden Window",
+    "T1176": "Browser Extensions",
     "T1003.001": "LSASS Memory",
     "T1003.002": "Security Account Manager",
     "T1059": "Command and Scripting Interpreter",

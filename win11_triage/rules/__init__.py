@@ -10,6 +10,8 @@ from .heuristics import BASE_RULES, Rule, vt_verdict
 
 def apply_rules(findings: Iterable[Finding], rules: list[Rule] | None = None) -> None:
     for f in findings:
+        if f.source == "browser":  # señales propias, calculadas al recolectar
+            continue
         for rule in rules or BASE_RULES:
             f.signals.extend(rule(f))
 

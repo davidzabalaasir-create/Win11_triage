@@ -207,6 +207,7 @@ SOURCE_LABEL = {
     "process": "Proceso",
     "event": "Evento",
     "sigma": "Sigma",
+    "browser": "Navegador",
 }
 
 

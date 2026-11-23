@@ -41,7 +41,7 @@ def test_dry_run_end_to_end(tmp_path):
 
     data = json.loads(reports[0].read_text(encoding="utf-8"))
     assert data["dry_run"] is True
-    assert data["summary"] == {"DETECTADO": 21, "DESCONOCIDO": 5, "LIMPIO": 2}
+    assert data["summary"] == {"DETECTADO": 23, "DESCONOCIDO": 6, "LIMPIO": 2}
     assert data["whitelisted"] == 1
     assert data["findings"][0]["status"] == "DETECTADO"
 
@@ -96,7 +96,7 @@ def test_html_report_and_json_roundtrip(tmp_path):
 
     loaded = report.load_json(files[".json"])
     assert loaded.dry_run and loaded.finished is not None
-    assert {s.value: n for s, n in loaded.counts().items()} == {"DETECTADO": 21, "DESCONOCIDO": 5, "LIMPIO": 2}
+    assert {s.value: n for s, n in loaded.counts().items()} == {"DETECTADO": 23, "DESCONOCIDO": 6, "LIMPIO": 2}
     assert sum(len(f.connections) for f in loaded.findings) == 17
     assert any(s.id == "CMD_PS_ENCODED" for f in loaded.findings for s in f.signals)
 

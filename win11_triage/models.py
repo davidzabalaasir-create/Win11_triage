@@ -62,7 +62,7 @@ class Connection:
 
 @dataclass
 class Finding:
-    source: str  # "autoruns" | "sigcheck" | "process" | "event" | "sigma"
+    source: str  # "autoruns" | "sigcheck" | "process" | "event" | "sigma" | "browser"
     name: str
     path: str
     publisher: str
