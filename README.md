@@ -49,9 +49,20 @@ Una sola señal débil (sin firma, carpeta de usuario) nunca basta para el rojo.
 
 ## Instalación
 
-### Opción A: ejecutable (sin Python)
+### Opción A: instalador (sin Python)
 
-Descarga `win11-triage-gui.exe` (interfaz) o `win11-triage.exe` (consola) desde [Releases](https://github.com/davidzabalaasir-create/Win11_triage/releases) o desde los artefactos de la última ejecución de [CI](https://github.com/davidzabalaasir-create/Win11_triage/actions). La configuración y los informes se guardan junto al `.exe`.
+En [Releases](https://github.com/davidzabalaasir-create/Win11_triage/releases) hay tres formatos, todos firmados digitalmente por **David**:
+
+| Archivo | Para qué |
+|---|---|
+| `win11-triage-setup-<versión>.exe` | Instalador con asistente. Instala solo para tu usuario, sin pedir administrador, y puede instalar las herramientas de Sysinternals |
+| `win11-triage-<versión>.msi` | Instalador MSI para todo el equipo. Sirve para despliegues con GPO, Intune o SCCM: `msiexec /i win11-triage-<versión>.msi /qn` |
+| `win11-triage-portable-<versión>.zip` | Sin instalar: descomprimir y ejecutar |
+
+La configuración y los informes se guardan en `%LOCALAPPDATA%\win11-triage`; en la versión portable, en su propia carpeta.
+
+> [!NOTE]
+> La firma es de un certificado propio (autofirmado). Windows puede seguir mostrando SmartScreen o bloquearla con el **Control de aplicaciones inteligente** hasta que esté disponible la firma de SignPath Foundation (ver [Firma de código](#firma-de-código)).
 
 ### Opción B: desde el código
 
@@ -201,8 +212,18 @@ win11_triage/
 
 ## Firma de código
 
-Los binarios de Windows se firmarán mediante [SignPath.io](https://about.signpath.io/) con un certificado de [SignPath Foundation](https://signpath.org/). Ver la [política de firma](CODE_SIGNING_POLICY.md).
+Los binarios (`.exe`, `.dll`, `.pyd`, el instalador y el `.msi`) se firman con un certificado **«David»** con sello de tiempo. En sus propiedades (clic derecho → Propiedades → Firmas digitales) aparece «David».
+
+- **Certificado propio (gratis).** El autor lo crea una vez en su PC con `scripts\new_signing_cert.ps1 -Trust` y lo guarda como secretos de GitHub (`WIN11_TRIAGE_PFX` y `WIN11_TRIAGE_PFX_PASSWORD`). Desde entonces la CI firma con él cada compilación. Si el secreto no existe, la CI firma con un certificado «David» temporal.
+  - Al ser autofirmado, **solo es de confianza en los equipos donde se importe** `win11-triage-david.cer`.
+  - **No evita** SmartScreen ni el Control de aplicaciones inteligente en otros equipos.
+- **SignPath Foundation (solicitado, gratis).** Certificado de confianza pública para proyectos de código abierto: [SignPath.io](https://about.signpath.io/), certificado de [SignPath Foundation](https://signpath.org/). Ver la [política de firma](CODE_SIGNING_POLICY.md).
+- **Certum (opcional, de pago).** `scripts\sign_release.ps1` firma la versión portable con un certificado de Certum y reconstruye el instalador.
+
+### Publicar una versión
+
+Con un tag `v*`, o desde **Actions → CI → Run workflow** indicando `release_tag` (p. ej. `v2.0.0`): la CI compila, prueba el instalador y publica la release con el instalador y la versión portable.
 
 ## Licencia
 
-[MIT](LICENSE)
+© 2026 David. Publicado bajo licencia [MIT](LICENSE).

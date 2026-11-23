@@ -13,7 +13,7 @@ from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.status import Status as RichStatus
 
-from . import __version__, env_check, report
+from . import __copyright__, __version__, env_check, report
 from .engine import Reporter, TriageEngine, TriageOptions
 from .models import Cancelled, Finding, Status
 from .report import TriageResult
@@ -81,7 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
     opt.add_argument(
         "-v", "--verbose", action="store_true", help="muestra comandos ejecutados y detalles de depuración"
     )
-    opt.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    opt.add_argument("--version", action="version", version=f"%(prog)s {__version__} · {__copyright__}")
     return p
 
 

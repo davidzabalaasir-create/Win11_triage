@@ -29,6 +29,11 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y 
   - exportación CSV, HTML, MD y JSON;
   - menús contextuales, perfiles Rápido y Completo, atajos de teclado y preferencias persistentes.
 - Lista blanca por **editor firmado** (`publishers`).
+- **Aplicación de Windows**:
+  - instalador `.exe` (Inno Setup), instalador **`.msi`** (WiX) y versión portable `.zip`;
+  - **firma digital «David»** en todos los binarios;
+  - copyright © 2026 David en el ejecutable, los instaladores, la interfaz y los informes;
+  - registro de errores, autodiagnóstico (`--selftest`) e instalación de Sysinternals con winget desde la app.
 
 ### Cambiado
 - Las entradas firmadas por Microsoft ya no se descartan si se usan de forma sospechosa (LOLBin, WMI, IFEO).

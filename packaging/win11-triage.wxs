@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Instalador MSI de win11-triage (WiX Toolset v5).
+  Compilar (desde la raíz del repositorio, tras PyInstaller):
+    wix build packaging\win11-triage.wxs -arch x64 -ext WixToolset.UI.wixext
+        -d Version=2.0.0 -o dist\win11-triage-2.0.0.msi
+  Para despliegues silenciosos (GPO, Intune, SCCM):  msiexec /i win11-triage-2.0.0.msi /qn
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="win11-triage"
+           Manufacturer="David"
+           Version="$(var.Version)"
+           UpgradeCode="5E8B2C41-7D3A-4F6B-9C12-3A4B5C6D7E8F"
+           Scope="perMachine"
+           Compressed="yes">
+    <SummaryInformation Description="win11-triage - triaje defensivo de Windows" Manufacturer="David" />
+
+    <MajorUpgrade DowngradeErrorMessage="Ya hay instalada una version mas reciente de win11-triage." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="AppIcon" SourceFile="win11_triage\assets\icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/davidzabalaasir-create/Win11_triage" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/davidzabalaasir-create/Win11_triage/issues" />
+    <Property Id="ARPCONTACT" Value="David" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="win11-triage" />
+    </StandardDirectory>
+
+    <!-- Todo el contenido generado por PyInstaller (dist\win11-triage). -->
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <!-- Ruta relativa a este .wxs: dist\win11-triage generado por PyInstaller. -->
+      <Files Include="..\dist\win11-triage\**" />
+    </ComponentGroup>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="StartMenuApp" Name="win11-triage" Description="Triaje defensivo de Windows"
+                  Target="[INSTALLFOLDER]win11-triage-gui.exe" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
+        <RegistryValue Root="HKCU" Key="Software\David\win11-triage" Name="StartMenuShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Condition="INSTALLDESKTOPSHORTCUT = 1">
+        <Shortcut Id="DesktopApp" Name="win11-triage" Description="Triaje defensivo de Windows"
+                  Target="[INSTALLFOLDER]win11-triage-gui.exe" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
+        <RegistryValue Root="HKCU" Key="Software\David\win11-triage" Name="DesktopShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+    <!-- msiexec /i ... INSTALLDESKTOPSHORTCUT=0 para no crear el acceso directo del escritorio. -->
+    <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" />
+
+    <Feature Id="Main" Title="win11-triage" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="packaging\LICENSE.rtf" />
+  </Package>
+</Wix>

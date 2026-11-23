@@ -14,11 +14,11 @@ VSVersionInfo(
                     fileType=0x1, subtype=0x0, date=(0, 0)),
   kids=[
     StringFileInfo([StringTable('0C0A04B0', [
-      StringStruct('CompanyName', 'win11-triage'),
+      StringStruct('CompanyName', 'David'),
       StringStruct('FileDescription', 'win11-triage - triaje defensivo de Windows'),
       StringStruct('FileVersion', '{version}'),
       StringStruct('InternalName', 'win11-triage'),
-      StringStruct('LegalCopyright', 'Licencia MIT'),
+      StringStruct('LegalCopyright', '© 2026 David. Licencia MIT.'),
       StringStruct('OriginalFilename', 'win11-triage.exe'),
       StringStruct('ProductName', 'win11-triage'),
       StringStruct('ProductVersion', '{version}')])]),

@@ -306,5 +306,7 @@ class AboutDialog(_Modal):
             ctk.CTkButton(row, text=text, width=130, fg_color=CARD, hover_color=BORDER, command=cmd).pack(
                 side="left", padx=6
             )
-        ctk.CTkLabel(self, text="Licencia MIT", text_color=MUTED, font=ctk.CTkFont(size=11)).pack(pady=(14, 0))
+        ctk.CTkLabel(self, text="© 2026 David · Licencia MIT", text_color=MUTED, font=ctk.CTkFont(size=11)).pack(
+            pady=(14, 0)
+        )
         ctk.CTkButton(self, text="Cerrar", width=120, command=self.destroy).pack(pady=12)
