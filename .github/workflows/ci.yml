@@ -87,7 +87,7 @@ jobs:
           PFX: ${{ secrets.WIN11_TRIAGE_PFX }}
           PFX_PASSWORD: ${{ secrets.WIN11_TRIAGE_PFX_PASSWORD }}
         run: |
-          foreach ($f in "build_exe", "new_signing_cert", "sign_release") {
+          foreach ($f in "build_exe", "build_msix", "new_signing_cert", "sign_release") {
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile("$PWD\scripts\$f.ps1", [ref]$null, [ref]$errors) | Out-Null
             if ($errors) { $errors | Out-Host; throw "$f.ps1 tiene errores de sintaxis" }
@@ -155,12 +155,30 @@ jobs:
           $u = Start-Process msiexec.exe -ArgumentList "/x",$msi,"/qn","/norestart" -Wait -PassThru
           if ($u.ExitCode -ne 0) { throw "msiexec /x falló ($($u.ExitCode))" }
           if (Test-Path "$dir\win11-triage-gui.exe") { throw "La desinstalación del MSI dejó ficheros" }
+      - name: Paquete MSIX (Microsoft Store)
+        shell: pwsh
+        run: |
+          $c = Get-Item "Cert:\CurrentUser\My\${{ steps.cert.outputs.thumbprint }}"
+          ./scripts/build_msix.ps1 -Publisher $c.Subject -CertThumbprint $c.Thumbprint
+          $msix = Get-ChildItem dist\win11-triage-*.msix | Select-Object -First 1
+          if ($msix.Length -lt 5MB) { throw "El MSIX ocupa demasiado poco: no contiene la aplicación" }
+      - name: Probar el MSIX (instalar, abrir la CLI, desinstalar)
+        continue-on-error: true  # depende del soporte de AppX del runner
+        shell: pwsh
+        run: |
+          $msix = (Get-ChildItem dist\win11-triage-*.msix | Select-Object -First 1).FullName
+          Add-AppxPackage -Path $msix
+          $pkg = Get-AppxPackage -Name "David.win11-triage"
+          if (-not $pkg) { throw "El paquete no quedó instalado" }
+          & (Join-Path $pkg.InstallLocation "win11-triage.exe") --version
+          Remove-AppxPackage -Package $pkg.PackageFullName
       - uses: actions/upload-artifact@v4
         with:
           name: win11-triage-windows
           path: |
             dist/win11-triage-setup-*.exe
             dist/win11-triage-*.msi
+            dist/win11-triage-*.msix
             dist/win11-triage-portable-*.zip
       - name: Publicar release
         if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
@@ -172,6 +190,7 @@ jobs:
           files: |
             dist/win11-triage-setup-*.exe
             dist/win11-triage-*.msi
+            dist/win11-triage-*.msix
             dist/win11-triage-portable-*.zip
           generate_release_notes: true
       - name: Probar el script de firma de Certum (certificado de prueba autofirmado)

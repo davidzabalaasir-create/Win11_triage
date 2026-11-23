@@ -22,6 +22,8 @@ def cli_command() -> list[str]:
     """Cómo invocar la CLI: el .exe de consola junto a la app instalada, o Python + módulo."""
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).resolve().parent
+        if "\\windowsapps\\" in str(exe_dir).lower():  # paquete MSIX: solo se puede lanzar por el alias
+            return ["win11-triage.exe"]
         return [str(exe_dir / "win11-triage.exe")]
     return [sys.executable, "-m", "win11_triage"]
 
