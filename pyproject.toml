@@ -56,3 +56,5 @@ keep-runtime-typing = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Si un test se cuelga, vuelca la pila de todos los hilos (diagnóstico en CI).
+faulthandler_timeout = 90
