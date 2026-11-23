@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import gc
 import logging
 import os
 import platform
@@ -1234,6 +1235,13 @@ class TriageApp(ctk.CTk):
         self.set_running(True)
         self.render_all()
         self.log_line("INFO", "Análisis iniciado" + (" (modo demostración)" if opts.dry_run else ""))
+        # Los widgets destruidos (detalle, avisos…) tienen ciclos con objetos de Tk. Si el recolector de
+        # basura los libera desde un hilo del análisis, su __del__ llama a Tk fuera del hilo principal y
+        # puede quedarse esperando para siempre (visto con Python 3.10). Se liberan aquí, en el principal.
+        # Mientras dura el análisis la recolección automática queda en pausa (la memoria normal se sigue
+        # liberando al momento); set_running(False) la reactiva y recoge lo pendiente en este hilo.
+        gc.collect()
+        gc.disable()
         self.worker = threading.Thread(target=self._work, args=(opts,), daemon=True)
         self.worker.start()
 
@@ -2252,6 +2260,9 @@ class TriageApp(ctk.CTk):
 
     # ================================================================= utilidades
     def set_running(self, running: bool) -> None:
+        if not running and not gc.isenabled():
+            gc.enable()
+            gc.collect()
         if running:
             self.started_at = time.monotonic()
             self.elapsed_label.configure(text="0 s")
