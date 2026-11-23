@@ -1,4 +1,5 @@
 title: Borrado de copias de seguridad (preparación de ransomware)
+title_en: Backup deletion (ransomware preparation)
 id: w11t-shadow-delete
 status: stable
 description: vssadmin, wmic, wbadmin o bcdedit usados para borrar instantáneas o desactivar la recuperación.

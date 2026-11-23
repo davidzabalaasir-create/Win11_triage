@@ -1,4 +1,5 @@
 title: Ejecución desde carpetas temporales o públicas
+title_en: Execution from temporary or public folders
 id: w11t-exec-user-dirs
 status: stable
 description: Un ejecutable arranca desde Temp, Downloads, Public o AppData\Roaming lanzado por un intérprete o el navegador.

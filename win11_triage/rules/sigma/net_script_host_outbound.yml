@@ -1,4 +1,5 @@
 title: Intérprete de scripts conectando a Internet
+title_en: Script interpreter connecting to the Internet
 id: w11t-net-script-host
 status: stable
 description: PowerShell, wscript, mshta, rundll32 o regsvr32 abren conexiones salientes a direcciones públicas.

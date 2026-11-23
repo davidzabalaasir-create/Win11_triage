@@ -1,4 +1,5 @@
 title: Binario del sistema usado para descargar o ejecutar código
+title_en: System binary used to download or run code
 id: w11t-lolbin-download
 status: stable
 description: certutil, bitsadmin, mshta, regsvr32 o rundll32 con URLs o scripts remotos (Living off the Land).

@@ -185,3 +185,26 @@ def test_settings_integrations(app, tmp_path, monkeypatch):
     _run(app)
     _pump_until(app, lambda: bool(sent), timeout=5)
     assert "win11-triage" in sent[0][0]
+
+
+def test_english_interface(tmp_path):
+    import json
+
+    from win11_triage import i18n
+    from win11_triage.gui import app as gui_app
+
+    (tmp_path / "gui_settings.json").write_text(json.dumps({"language": "en"}), encoding="utf-8")
+    try:
+        a = gui_app.TriageApp(tmp_path)
+    except tk.TclError as e:
+        pytest.skip(f"Tk no disponible: {e}")
+    try:
+        a.withdraw()
+        a.update()
+        assert a.page_title.cget("text") == "Home"
+        assert "Scan" in a.run_btn.cget("text")
+        texts = [b.cget("text") for b in a.nav.rows["settings"][2:]]
+        assert any("Settings" in x for x in texts)
+    finally:
+        a.destroy()
+        i18n.set_language("es")

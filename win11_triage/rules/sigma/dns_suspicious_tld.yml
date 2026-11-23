@@ -1,4 +1,5 @@
 title: Consulta DNS a servicios de túnel o dominios de alto riesgo
+title_en: DNS query to tunnelling services or high-risk domains
 id: w11t-dns-tunnel
 status: stable
 description: Resolución de dominios de túneles (ngrok, trycloudflare) o de pegado de código usados para C2 o exfiltración.

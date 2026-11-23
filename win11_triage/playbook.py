@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .i18n import t
 from .models import Finding, Status
 
 
@@ -189,7 +190,7 @@ def advice_for(f: Finding, limit: int = 6) -> Advice:
     if not summaries:
         summaries.append(general.summary)
     steps = steps[:limit] + [x for x in general.steps if x not in steps]
-    return Advice(" ".join(summaries[:2]), tuple(steps))
+    return Advice(" ".join(t(s) for s in summaries[:2]), tuple(t(s) for s in steps))
 
 
 def as_text(f: Finding) -> str:

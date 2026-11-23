@@ -1,4 +1,5 @@
 title: Clave Run apuntando a script o carpeta de usuario
+title_en: Run key pointing to a script or user folder
 id: w11t-reg-run-suspicious
 status: stable
 description: Se escribe en Run/RunOnce un valor que lanza un intérprete o un binario en una carpeta de usuario.

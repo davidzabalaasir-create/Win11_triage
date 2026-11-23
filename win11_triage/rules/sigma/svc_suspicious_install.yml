@@ -1,4 +1,5 @@
 title: Servicio instalado con intérprete o en carpeta de usuario
+title_en: Service installed with an interpreter or in a user folder
 id: w11t-svc-suspicious
 status: stable
 description: Evento 7045 con un servicio cuyo binario es un intérprete, usa %COMSPEC% o vive en una carpeta de usuario (PsExec, Cobalt Strike…).

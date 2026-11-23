@@ -110,8 +110,9 @@ class Finding:
     def key(self) -> str:
         """Identidad estable entre ejecuciones (historial, comparación y revisiones)."""
         ident = (self.path or self.name).strip().strip('"').lower()
-        if self.source == "sigma":
-            ident = f"{self.name.lower()}|{ident}"
+        if self.source == "sigma":  # varias reglas en el mismo binario; el id no depende del idioma
+            rule = next((s.id for s in self.signals if s.id.startswith("SIGMA_")), self.name)
+            ident = f"{rule.lower()}|{ident}"
         return f"{self.source}|{ident}|{(self.sha256 or '').lower()}"
 
     @property

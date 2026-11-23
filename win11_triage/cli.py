@@ -18,6 +18,7 @@ from rich.status import Status as RichStatus
 
 from . import __copyright__, __version__, env_check, report
 from .engine import Reporter, TriageEngine, TriageOptions
+from .i18n import set_language, t
 from .models import Cancelled, Finding, Status
 from .remote import RemoteError
 from .report import TriageResult
@@ -140,6 +141,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--explain", action="store_true", help="«¿Qué hago con esto?»: pasos recomendados para los 5 más graves"
     )
     opt.add_argument("--check-update", action="store_true", help="comprueba si hay una versión nueva y sale")
+    opt.add_argument(
+        "--lang",
+        choices=("es", "en"),
+        default=None,
+        help="idioma de los informes y mensajes: es (por defecto) o en; también WIN11_TRIAGE_LANG",
+    )
     opt.add_argument("--no-color", action="store_true", help="desactiva los colores")
     opt.add_argument(
         "-v", "--verbose", action="store_true", help="muestra comandos ejecutados y detalles de depuración"
@@ -355,7 +362,7 @@ def print_explain(res: TriageResult) -> None:
         console.print(
             Panel(
                 f"[bold]{adv.summary}[/]\n{steps}",
-                title=f"¿Qué hago con esto? · {f.name} (score {f.score})",
+                title=f"{t('¿Qué hago con esto?')} · {f.name} (score {f.score})",
                 title_align="left",
                 border_style="red" if f.status == Status.DETECTED else "yellow",
             )
@@ -443,6 +450,8 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
     args = parse_args(argv)
+    if args.lang:
+        set_language(args.lang)
     if args.check_update:
         return check_update()
     if args.schedule:

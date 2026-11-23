@@ -30,7 +30,7 @@ import customtkinter as ctk
 import requests
 from dotenv import load_dotenv, set_key
 
-from .. import __version__, alerts, collectors_live, env_check, history, playbook, report, scheduler
+from .. import __version__, alerts, collectors_live, env_check, history, i18n, playbook, report, scheduler
 from ..engine import PLACEHOLDER_KEY, Reporter, TriageEngine, TriageOptions
 from ..enrich import pe_static, yara_scan
 from ..models import Cancelled, Finding, Status
@@ -168,6 +168,7 @@ class QueueReporter(Reporter):
 class TriageApp(ctk.CTk):
     def __init__(self, config_dir: Path) -> None:
         self.prefs = settings.load(config_dir)
+        i18n.set_language(self.prefs.get("language", "es"))
         ctk.set_appearance_mode(APPEARANCE.get(self.prefs.get("appearance", "Oscuro"), "dark"))
         super().__init__()
         self.config_dir = config_dir
@@ -230,6 +231,7 @@ class TriageApp(ctk.CTk):
         if not self.windows:
             self.log_line("AVISO", "Este sistema no es Windows: solo está disponible el modo demostración.")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        i18n.translate_tree(self)
         self.after(100, self.poll_events)
 
     # ================================================================= estructura
@@ -822,7 +824,13 @@ class TriageApp(ctk.CTk):
             **segmented_style(),
         )
         self.appearance.set(self.prefs.get("appearance", "Oscuro"))
-        self.appearance.pack(anchor="w", padx=SPACE["l"], pady=(0, SPACE["l"]))
+        self.appearance.pack(anchor="w", padx=SPACE["l"], pady=(0, SPACE["s"]))
+        ctk.CTkLabel(ap, text="Idioma", font=font("caption_bold")).pack(anchor="w", padx=SPACE["l"])
+        self.language = ctk.CTkSegmentedButton(
+            ap, values=list(i18n.LANGUAGES.values()), command=self.set_language, height=CONTROL_H, **segmented_style()
+        )
+        self.language.set(i18n.LANGUAGES.get(self.prefs.get("language", "es"), "Español"))
+        self.language.pack(anchor="w", padx=SPACE["l"], pady=(SPACE["xs"], SPACE["l"]))
 
         tools = section(1, 0, "Herramientas y componentes", "Sysinternals se instala con winget; YARA es opcional.")
         self.tools_frame = ctk.CTkFrame(tools, fg_color="transparent")
@@ -856,14 +864,14 @@ class TriageApp(ctk.CTk):
         self.page = key
         self.pages[key].tkraise()
         self.nav.set_active(key)
-        self.page_title.configure(text=dict((k, t) for k, t, _ in PAGES)[key])
+        self.page_title.configure(text=i18n.t(dict((k, t) for k, t, _ in PAGES)[key]))
         self.update_subtitle()
 
     def update_subtitle(self) -> None:
-        text = PAGE_SUBTITLE[self.page]
+        text = i18n.t(PAGE_SUBTITLE[self.page])
         if self.result is not None and self.page in ("home", "findings", "network"):
             res = self.result
-            mode = " · demostración" if res.dry_run else ""
+            mode = f" · {i18n.t('demostración')}" if res.dry_run else ""
             text = f"{res.host} · {res.started:%d/%m/%Y %H:%M}{mode}{self._loaded_suffix}"
         self.subtitle.configure(text=text)
 
@@ -936,7 +944,7 @@ class TriageApp(ctk.CTk):
         for text, token in chips:
             ctk.CTkButton(
                 self.env_chips,
-                text=f"● {text}",
+                text=f"● {i18n.t(text)}",
                 height=22,
                 corner_radius=11,
                 fg_color="transparent",
@@ -1261,19 +1269,19 @@ class TriageApp(ctk.CTk):
         cnt = res.counts() if res else dict.fromkeys(Status, 0)
         self.donut.set(
             [
-                ("Detectados", cnt[Status.DETECTED], "danger"),
-                ("Sospechosos", cnt[Status.UNKNOWN], "warning"),
-                ("Limpios", cnt[Status.CLEAN], "success"),
+                (i18n.t("Detectados"), cnt[Status.DETECTED], "danger"),
+                (i18n.t("Sospechosos"), cnt[Status.UNKNOWN], "warning"),
+                (i18n.t("Limpios"), cnt[Status.CLEAN], "success"),
             ],
             str(sum(cnt.values())),
-            "elementos",
+            i18n.t("elementos"),
         )
         top = max((f.score for f in self.findings), default=0)
         if res is None:
             caption = "sin análisis"
         else:
             caption = "riesgo alto" if top >= 70 else "riesgo medio" if top >= 30 else "riesgo bajo"
-        self.gauge.set(top, caption, score_token(top) if res else "text2")
+        self.gauge.set(top, i18n.t(caption), score_token(top) if res else "text2")
         self.attack_chart.set(
             [(f"{t}  {name}", n, "info", str(n)) for t, name, n in report.attack_summary(self.findings)]
         )
@@ -1283,9 +1291,9 @@ class TriageApp(ctk.CTk):
                 "",
                 "end",
                 iid=str(self.findings.index(f)),
-                text=f"  {STATUS_LABEL[f.status]}",
+                text=f"  {i18n.t(STATUS_LABEL[f.status])}",
                 image=self.dots[f.status],
-                values=(f.score, SOURCE_LABEL.get(f.source, f.source), f.name, report.why(f, 2)),
+                values=(f.score, i18n.t(SOURCE_LABEL.get(f.source, f.source)), f.name, report.why(f, 2)),
             )
 
     def visible_rows(self) -> list[tuple[int, Finding]]:
@@ -1357,15 +1365,15 @@ class TriageApp(ctk.CTk):
                 "",
                 "end",
                 iid=str(i),
-                text=f"  {STATUS_LABEL[f.status]}",
+                text=f"  {i18n.t(STATUS_LABEL[f.status])}",
                 image=self.dots[f.status],
                 values=(
                     f.score,
-                    SOURCE_LABEL.get(f.source, f.source),
+                    i18n.t(SOURCE_LABEL.get(f.source, f.source)),
                     ("◆ " if is_new else "") + f.name,
                     elide_middle(f.path or "—", 40),
                     report.why(f) or f.signature,
-                    f.vt_summary,
+                    i18n.t(f.vt_summary),
                     self._review_label(f),
                 ),
             )
@@ -1381,7 +1389,9 @@ class TriageApp(ctk.CTk):
         self.filter_btn.set_counts(counts if self.findings else {})
         if self.findings:
             done = sum(1 for f in self.findings if self.reviews.state(f.key) != PENDING)
-            self.review_progress.configure(text=f"Revisados {done}/{len(self.findings)}  ·  teclas P R F C")
+            self.review_progress.configure(
+                text=f"{i18n.t('Revisados')} {done}/{len(self.findings)}  ·  {i18n.t('teclas')} P R F C"
+            )
         else:
             self.review_progress.configure(text="")
         self.nav.set_label("findings", f"Hallazgos  ({len(self.findings)})" if self.findings else "Hallazgos")
@@ -1408,7 +1418,7 @@ class TriageApp(ctk.CTk):
             self.conn_tree.insert(
                 "",
                 "end",
-                text=f"  {STATUS_LABEL[st]}",
+                text=f"  {i18n.t(STATUS_LABEL[st])}",
                 image=self.dots[st],
                 values=(cn.process, cn.pid, cn.protocol, cn.state, cn.local, cn.remote),
             )
@@ -1427,6 +1437,7 @@ class TriageApp(ctk.CTk):
         return "\n".join(self._detail_lines)
 
     def _section(self, title: str) -> ctk.CTkFrame:
+        title = i18n.t(title)
         ctk.CTkLabel(self.detail_body, text=title.upper(), font=font("overline"), text_color=T("text2")).pack(
             anchor="w", padx=SPACE["m"], pady=(SPACE["l"], SPACE["xs"])
         )
@@ -1436,7 +1447,7 @@ class TriageApp(ctk.CTk):
         return box
 
     def _kv(self, parent: ctk.CTkFrame, label: str, value: str, monospace: bool = False) -> None:
-        ctk.CTkLabel(parent, text=label, font=font("caption"), text_color=T("text2")).pack(anchor="w")
+        ctk.CTkLabel(parent, text=i18n.t(label), font=font("caption"), text_color=T("text2")).pack(anchor="w")
         ctk.CTkLabel(
             parent,
             text=value or "—",
@@ -1466,7 +1477,7 @@ class TriageApp(ctk.CTk):
             return
         head = ctk.CTkFrame(self.detail_body, fg_color="transparent")
         head.pack(fill="x", padx=SPACE["m"], pady=(SPACE["m"], 0))
-        Badge(head, STATUS_LABEL[f.status], STATUS_TOKEN[f.status]).pack(side="left")
+        Badge(head, i18n.t(STATUS_LABEL[f.status]), STATUS_TOKEN[f.status]).pack(side="left")
         ctk.CTkLabel(head, text=str(f.score), font=font("display"), text_color=T(score_token(f.score))).pack(
             side="right"
         )
@@ -1478,7 +1489,7 @@ class TriageApp(ctk.CTk):
         )
         ctk.CTkLabel(
             self.detail_body,
-            text=f"{SOURCE_LABEL.get(f.source, f.source)} · {f.category or '—'}",
+            text=f"{i18n.t(SOURCE_LABEL.get(f.source, f.source))} · {f.category or '—'}",
             font=font("caption"),
             text_color=T("text2"),
             wraplength=330,
@@ -1498,7 +1509,7 @@ class TriageApp(ctk.CTk):
             key = next(k for k, v in STATE_KEYS.items() if v == st).upper()
             ctk.CTkButton(
                 grid,
-                text=f"{st}  ·  {key}",
+                text=f"{i18n.t(st)}  ·  {key}",
                 height=30,
                 corner_radius=15,
                 border_width=1,
@@ -1549,7 +1560,7 @@ class TriageApp(ctk.CTk):
                 row.pack(fill="x", pady=(0, SPACE["xs"]))
                 token = "danger" if s.weight >= 50 else ("warning" if s.weight > 0 else "success")
                 Badge(row, f"{s.weight:+d}", token).pack(side="left", anchor="n")
-                txt = s.title + (f"  ·  {s.attack}" if s.attack else "")
+                txt = i18n.t(s.title) + (f"  ·  {s.attack}" if s.attack else "")
                 ctk.CTkLabel(row, text=txt, font=font("body"), wraplength=260, justify="left", anchor="w").pack(
                     side="left", padx=SPACE["s"], fill="x"
                 )
@@ -1584,7 +1595,7 @@ class TriageApp(ctk.CTk):
         vt = f.vt or {}
         box = self._section("VirusTotal")
         label = f" · {vt['label']}" if vt.get("label") else ""
-        self._kv(box, "Resultado", f"{f.vt_summary}{label}")
+        self._kv(box, "Resultado", f"{i18n.t(f.vt_summary)}{label}")
 
         self.vt_btn.configure(state="normal" if f.sha256 else "disabled")
         self.copy_hash_btn.configure(state="normal" if f.sha256 else "disabled")
@@ -1697,7 +1708,7 @@ class TriageApp(ctk.CTk):
                 "",
                 "end",
                 iid=str(n),
-                text=f"  {STATUS_LABEL[st]}",
+                text=f"  {i18n.t(STATUS_LABEL[st])}",
                 image=self.dots[st],
                 values=(
                     f"{e.started:%d/%m/%Y %H:%M:%S}",
@@ -1729,7 +1740,7 @@ class TriageApp(ctk.CTk):
             return
         siblings = [p for p in (e.sibling(".html"), e.sibling(".md"), e.path) if p]
         self.show_result(res, siblings, e.path)
-        self._loaded_suffix = " · cargado del historial"
+        self._loaded_suffix = i18n.t(" · cargado del historial")
         self.update_subtitle()
         self.log_line("INFO", f"Análisis cargado: {e.path.name}")
 
@@ -1938,6 +1949,19 @@ class TriageApp(ctk.CTk):
         toast(self, f"Exportado: {target.name}", "success", action=("Abrir", lambda: open_path(target)))
 
     # ================================================================= configuración
+    def set_language(self, label: str) -> None:
+        code = next((k for k, v in i18n.LANGUAGES.items() if v == label), "es")
+        if code == self.prefs.get("language", "es"):
+            return
+        self.prefs["language"] = code
+        settings.save(self.config_dir, self.prefs)
+        msg = (
+            "Restart the application to change the language."
+            if code == "en"
+            else ("Reinicia la aplicación para cambiar el idioma.")
+        )
+        toast(self, msg, "accent", ms=6000)
+
     def edit_secret(self, service: str, var: str, url: str) -> None:
         dlg = SecretDialog(self, os.environ.get(var, ""), service=service, url=url)
         self.wait_window(dlg)
@@ -2084,7 +2108,7 @@ class TriageApp(ctk.CTk):
             self.elapsed_label.configure(text="0 s")
             self.progress.set(0)
             self.run_btn.configure(
-                text=f"{glyph('stop')}  Cancelar",
+                text=f"{glyph('stop')}  {i18n.t('Cancelar')}",
                 fg_color=T("surface2"),
                 hover_color=T("border"),
                 text_color=T("danger"),
@@ -2093,7 +2117,7 @@ class TriageApp(ctk.CTk):
         else:
             self.indeterminate(False)
             self.run_btn.configure(
-                text=f"{glyph('play')}  Analizar",
+                text=f"{glyph('play')}  {i18n.t('Analizar')}",
                 fg_color=T("accent"),
                 hover_color=T("accent_hover"),
                 text_color="#FFFFFF",
@@ -2110,6 +2134,7 @@ class TriageApp(ctk.CTk):
             self.progress.configure(mode="determinate")
 
     def set_status(self, text: str) -> None:
+        text = i18n.t(text)
         self.status_label.configure(text=text if len(text) < 110 else text[:107] + "…")
 
     def log_line(self, level: str, text: str) -> None:

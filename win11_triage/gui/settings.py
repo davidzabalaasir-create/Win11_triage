@@ -29,6 +29,7 @@ DEFAULTS: dict[str, Any] = {
     "alert_new": True,
     "schedule": "Desactivado",
     "schedule_at": "09:00",
+    "language": "es",
 }
 
 
@@ -50,6 +51,7 @@ def load(config_dir: Path) -> dict[str, Any]:
             "alert_new",
             "schedule",
             "schedule_at",
+            "language",
         ):
             if key in stored:
                 data[key] = stored[key]

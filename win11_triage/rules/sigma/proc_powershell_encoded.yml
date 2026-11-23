@@ -1,4 +1,5 @@
 title: PowerShell con comando codificado u oculto
+title_en: PowerShell with an encoded or hidden command
 id: w11t-ps-encoded
 status: stable
 description: PowerShell lanzado con -EncodedCommand, ventana oculta o descarga en memoria.

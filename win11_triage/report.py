@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import html
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +15,7 @@ from rich.table import Table
 
 from . import __copyright__, __version__, playbook
 from .env_check import ToolStatus
+from .i18n import get_language, t
 from .models import Connection, Finding, Signal, Status
 from .rules.attack import attack_url, technique_name
 
@@ -80,14 +82,14 @@ def attack_summary(findings: list[Finding]) -> list[tuple[str, str, int]]:
     for f in findings:
         if f.status is Status.CLEAN:
             continue
-        for t in f.attack:
-            counts[t] = counts.get(t, 0) + 1
+        for tech in f.attack:
+            counts[tech] = counts.get(tech, 0) + 1
     return sorted(((t, technique_name(t), n) for t, n in counts.items()), key=lambda x: (-x[2], x[0]))
 
 
 def why(f: Finding, n: int = 2) -> str:
     """Resumen corto de las señales positivas de mayor peso."""
-    return " · ".join([s.title for s in f.unique_signals if s.weight > 0][:n])
+    return " · ".join([t(s.title) for s in f.unique_signals if s.weight > 0][:n])
 
 
 def timeline(findings: list[Finding], limit: int = 40) -> list[Finding]:
@@ -213,30 +215,30 @@ SOURCE_LABEL = {
 
 # ------------------------------------------------------------------ Rich
 def env_table(tools: dict[str, ToolStatus]) -> Table:
-    t = Table(title="Comprobación de entorno", title_style="bold", title_justify="left")
-    t.add_column("Herramienta")
-    t.add_column("Estado")
-    t.add_column("Ubicación", overflow="fold")
+    tbl = Table(title=t("Comprobación de entorno"), title_style="bold", title_justify="left")
+    tbl.add_column(t("Herramienta"))
+    tbl.add_column(t("Estado"))
+    tbl.add_column(t("Ubicación"), overflow="fold")
     for name, st in tools.items():
         if st.found:
-            t.add_row(name, "[green]OK[/]", f"{st.path} [dim]({st.origin})[/]")
+            tbl.add_row(name, "[green]OK[/]", f"{st.path} [dim]({st.origin})[/]")
         else:
-            t.add_row(name, "[red]NO ENCONTRADA[/]", "—")
-    return t
+            tbl.add_row(name, "[red]NO ENCONTRADA[/]", "—")
+    return tbl
 
 
 def findings_table(title: str, findings: list[Finding]) -> Table:
-    t = Table(title=title, title_style="bold", title_justify="left", expand=True)
-    t.add_column("Estado", no_wrap=True)
-    t.add_column("Score", no_wrap=True, justify="right")
-    t.add_column("Nombre", overflow="fold", max_width=30)
-    t.add_column("Ruta", overflow="fold", ratio=3)
-    t.add_column("Por qué", overflow="fold", ratio=4)
-    t.add_column("VT", no_wrap=True, justify="right")
-    t.add_column("Red", no_wrap=True, justify="right")
+    tbl = Table(title=t(title), title_style="bold", title_justify="left", expand=True)
+    tbl.add_column(t("Estado"), no_wrap=True)
+    tbl.add_column(t("Score"), no_wrap=True, justify="right")
+    tbl.add_column(t("Nombre"), overflow="fold", max_width=30)
+    tbl.add_column(t("Ruta"), overflow="fold", ratio=3)
+    tbl.add_column(t("Por qué"), overflow="fold", ratio=4)
+    tbl.add_column(t("VT"), no_wrap=True, justify="right")
+    tbl.add_column(t("Red"), no_wrap=True, justify="right")
     for f in sort_findings(findings):
         st = f.status
-        t.add_row(
+        tbl.add_row(
             f"[{st.style}]{st.value}[/]",
             f"[{st.style}]{f.score}[/]",
             f.name,
@@ -245,11 +247,11 @@ def findings_table(title: str, findings: list[Finding]) -> Table:
             f"[{st.style}]{f.vt_summary}[/]",
             f"[magenta]{len(f.connections)}[/]" if f.connections else "[dim]—[/]",
         )
-    return t
+    return tbl
 
 
 def priority_table(findings: list[Finding]) -> Table:
-    t = Table(title="Prioriza esto primero", title_style="bold", title_justify="left", expand=True)
+    tbl = Table(title=t("Prioriza esto primero"), title_style="bold", title_justify="left", expand=True)
     for col, kw in (
         ("#", {"justify": "right"}),
         ("Score", {"justify": "right"}),
@@ -258,28 +260,28 @@ def priority_table(findings: list[Finding]) -> Table:
         ("Por qué", {"overflow": "fold", "ratio": 3}),
         ("ATT&CK", {"overflow": "fold"}),
     ):
-        t.add_column(col, **kw)
+        tbl.add_column(t(col), **kw)
     for i, f in enumerate(top_findings(findings), 1):
         st = f.status
-        t.add_row(
+        tbl.add_row(
             str(i),
             f"[{st.style}]{f.score}[/]",
-            SOURCE_LABEL.get(f.source, f.source),
+            t(SOURCE_LABEL.get(f.source, f.source)),
             f.name,
             why(f, 3),
             ", ".join(f.attack[:4]),
         )
-    return t
+    return tbl
 
 
 def attack_table(findings: list[Finding]) -> Table:
-    t = Table(title="Técnicas MITRE ATT&CK observadas", title_style="bold", title_justify="left")
-    t.add_column("Técnica")
-    t.add_column("Nombre")
-    t.add_column("Elementos", justify="right")
+    tbl = Table(title=t("Técnicas MITRE ATT&CK observadas"), title_style="bold", title_justify="left")
+    tbl.add_column(t("Técnica"))
+    tbl.add_column(t("Nombre"))
+    tbl.add_column(t("Elementos"), justify="right")
     for tid, name, n in attack_summary(findings):
-        t.add_row(tid, name, str(n))
-    return t
+        tbl.add_row(tid, name, str(n))
+    return tbl
 
 
 def unique_connections(findings: list[Finding]) -> list[tuple[Connection, Status]]:
@@ -294,12 +296,12 @@ def unique_connections(findings: list[Finding]) -> list[tuple[Connection, Status
 
 
 def connections_table(findings: list[Finding]) -> Table:
-    t = Table(title="Conexiones activas de procesos señalados", title_style="bold", title_justify="left")
+    tbl = Table(title=t("Conexiones activas de procesos señalados"), title_style="bold", title_justify="left")
     for col in ("Proceso", "PID", "Proto", "Estado", "Local", "Remoto", "Veredicto"):
-        t.add_column(col, overflow="fold")
+        tbl.add_column(t(col), overflow="fold")
     for c, st in unique_connections(findings):
-        t.add_row(c.process, c.pid, c.protocol, c.state, c.local, c.remote, f"[{st.style}]{st.value}[/]")
-    return t
+        tbl.add_row(c.process, c.pid, c.protocol, c.state, c.local, c.remote, f"[{st.style}]{st.value}[/]")
+    return tbl
 
 
 # ------------------------------------------------------------------ Markdown
@@ -345,14 +347,14 @@ def render_markdown(r: TriageResult) -> str:
     L.append("")
 
     L += ["## Resumen", "", "| Estado | Total |", "|---|---|"]
-    L += [f"| {st.icon} {st.value} | {counts[st]} |" for st in Status]
+    L += [f"| {st.icon} {t(st.value)} | {counts[st]} |" for st in Status]
     L.append("")
 
     top = top_findings(r.findings)
     if top:
         L += ["## Prioriza esto primero", "", "| # | Score | Origen | Nombre | Por qué |", "|---|---|---|---|---|"]
         L += [
-            f"| {i} | {f.status.icon} {f.score} | {SOURCE_LABEL.get(f.source, f.source)} | {_md(f.name)} | {_md(why(f, 3))} |"
+            f"| {i} | {f.status.icon} {f.score} | {t(SOURCE_LABEL.get(f.source, f.source))} | {_md(f.name)} | {_md(why(f, 3))} |"
             for i, f in enumerate(top, 1)
         ]
         L.append("")
@@ -377,7 +379,7 @@ def render_markdown(r: TriageResult) -> str:
         L += ["| Estado | Score | Nombre | Ruta | Por qué | VT | Red |", "|---|---|---|---|---|---|---|"]
         for f in sort_findings(findings):
             L.append(
-                f"| {f.status.icon} {f.status.value} | {f.score} | {_md(f.name)} | {_code(f.path)} "
+                f"| {f.status.icon} {t(f.status.value)} | {f.score} | {_md(f.name)} | {_code(f.path)} "
                 f"| {_md(why(f)) or '—'} | {_md(f.vt_summary)} | {len(f.connections) or '—'} |"
             )
         L += ["", "<details><summary>Detalle de cada elemento</summary>", ""]
@@ -418,7 +420,7 @@ def render_markdown(r: TriageResult) -> str:
             if f.unique_signals:
                 L += ["", "| Señal | Peso | ATT&CK | Evidencia |", "|---|---|---|---|"]
                 L += [
-                    f"| {_md(x.title)} | {x.weight:+d} | {_md(x.attack) or '—'} | {_code(x.evidence[:160]) if x.evidence else '—'} |"
+                    f"| {_md(t(x.title))} | {x.weight:+d} | {_md(x.attack) or '—'} | {_code(x.evidence[:160]) if x.evidence else '—'} |"
                     for x in f.unique_signals
                 ]
             L.append("")
@@ -445,7 +447,7 @@ def render_markdown(r: TriageResult) -> str:
     if events:
         L += ["## Cronología", "", "| Fecha | Estado | Origen | Nombre |", "|---|---|---|---|"]
         L += [
-            f"| {_md(f.created.replace('T', ' '))} | {f.status.icon} {f.score} | {SOURCE_LABEL.get(f.source, f.source)} | {_md(f.name)} |"
+            f"| {_md(f.created.replace('T', ' '))} | {f.status.icon} {f.score} | {t(SOURCE_LABEL.get(f.source, f.source))} | {_md(f.name)} |"
             for f in events
         ]
         L.append("")
@@ -618,7 +620,7 @@ def render_html(r: TriageResult) -> str:
     if top:
         rows = "".join(
             f"<tr><td>{i}</td><td><span class='badge' style='--c:{_HTML_COLOR[f.status]}'>{f.score}</span></td>"
-            f"<td>{_e(SOURCE_LABEL.get(f.source, f.source))}</td><td>{_e(f.name)}</td><td>{_e(why(f, 3))}</td></tr>"
+            f"<td>{_e(t(SOURCE_LABEL.get(f.source, f.source)))}</td><td>{_e(f.name)}</td><td>{_e(why(f, 3))}</td></tr>"
             for i, f in enumerate(top, 1)
         )
         parts.append(
@@ -642,7 +644,7 @@ def render_html(r: TriageResult) -> str:
             parts.append("<p class='muted'>Sin hallazgos.</p>")
             continue
         rows = "".join(
-            f"<tr><td><span class='badge' style='--c:{_HTML_COLOR[f.status]}'>{f.status.value}</span></td>"
+            f"<tr><td><span class='badge' style='--c:{_HTML_COLOR[f.status]}'>{t(f.status.value)}</span></td>"
             f"<td><b>{f.score}</b></td><td>{_e(f.name)}</td><td><code>{_e(f.path)}</code></td>"
             f"<td>{_e(why(f) or f.signature)}</td><td>{_e(f.vt_summary)}</td>"
             f"<td>{len(f.connections) or '—'}</td></tr>"
@@ -677,7 +679,7 @@ def render_html(r: TriageResult) -> str:
                 )
             dl = "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in items)
             sig_rows = "".join(
-                f"<tr><td>{_e(x.title)}</td><td>{x.weight:+d}</td><td>{_e(x.attack)}</td>"
+                f"<tr><td>{_e(t(x.title))}</td><td>{x.weight:+d}</td><td>{_e(x.attack)}</td>"
                 f"<td><code>{_e(x.evidence[:200])}</code></td></tr>"
                 for x in f.unique_signals
             )
@@ -692,7 +694,7 @@ def render_html(r: TriageResult) -> str:
                 steps = "".join(f"<li>{_e(s)}</li>" for s in adv.steps)
                 todo = f"<div class='todo'><b>¿Qué hago con esto?</b> {_e(adv.summary)}<ol>{steps}</ol></div>"
             parts.append(
-                f"<details><summary><span class='badge' style='--c:{_HTML_COLOR[f.status]}'>{f.status.value}</span> "
+                f"<details><summary><span class='badge' style='--c:{_HTML_COLOR[f.status]}'>{t(f.status.value)}</span> "
                 f"{_e(f.name)} <span class='muted'>· score {f.score}</span></summary>{todo}<dl>{dl}</dl>{sig_table}"
                 "</details>"
             )
@@ -720,7 +722,7 @@ def render_html(r: TriageResult) -> str:
         rows = "".join(
             f"<tr><td><code>{_e(f.created.replace('T', ' '))}</code></td>"
             f"<td><span class='badge' style='--c:{_HTML_COLOR[f.status]}'>{f.score}</span></td>"
-            f"<td>{_e(SOURCE_LABEL.get(f.source, f.source))}</td><td>{_e(f.name)}</td></tr>"
+            f"<td>{_e(t(SOURCE_LABEL.get(f.source, f.source)))}</td><td>{_e(f.name)}</td></tr>"
             for f in events
         )
         parts.append(
@@ -750,6 +752,60 @@ def render_html(r: TriageResult) -> str:
 FORMAT_CHOICES = ("md", "html", "json", "pdf", "both", "all")
 
 
+_MD_BOLD = re.compile(r"\*\*([^*]+?)(:?)\*\*")
+_HTML_TAGS = re.compile(r"<(th|h1|h2|dt|summary|b)>([^<]+?)( \(\d+\))?</\1>")
+
+
+def _tr_heading(text: str) -> str:
+    """Traduce un encabezado; mantiene el «— equipo» o el sufijo variable."""
+    head, sep, rest = text.partition(" — ")
+    return t(text) if t(text) != text else t(head) + sep + rest
+
+
+def localize_markdown(text: str) -> str:
+    """Traduce la estructura del informe (títulos, cabeceras de tabla, etiquetas en negrita)."""
+    if get_language() == "es":
+        return text
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if line.startswith("#"):
+            hashes, _, title = line.partition(" ")
+            m = re.match(r"(.+?)( \(\d+\))?$", title)
+            if m:
+                lines[i] = f"{hashes} {_tr_heading(m.group(1))}{m.group(2) or ''}"
+        elif line.startswith("|") and (
+            (i + 1 < len(lines) and lines[i + 1].startswith("|---")) or line.count("|") == 3
+        ):
+            cells = line.split("|")
+            header = i + 1 < len(lines) and lines[i + 1].startswith("|---")
+            if line.count("|") == 3 and not header:  # tabla clave | valor
+                cells[1], cells[2] = f" {t(cells[1].strip())} ", f" {t(cells[2].strip())} "
+            else:
+                cells = [f" {t(c.strip())} " if c.strip() else c for c in cells]
+            lines[i] = "|".join(cells)
+        elif line.startswith("> ") and not line.startswith("> ["):
+            lines[i] = "> " + t(line[2:])
+        elif line.startswith(("_", ">")):
+            lines[i] = line.replace(
+                "DRY-RUN**: datos de ejemplo; no se ejecutaron herramientas ni se usó la red.",
+                "DRY-RUN**: sample data; no tools were run and the network was not used.",
+            )
+        lines[i] = _MD_BOLD.sub(lambda m: f"**{t(m.group(1))}{m.group(2)}**", lines[i])
+    out = "\n".join(lines)
+    return out.replace(
+        "<summary>Detalle de cada elemento</summary>", f"<summary>{t('Detalle de cada elemento')}</summary>"
+    )
+
+
+def localize_html(text: str) -> str:
+    if get_language() == "es":
+        return text
+    text = text.replace("<html lang='es'>", "<html lang='en'>").replace('<html lang="es">', '<html lang="en">')
+    return _HTML_TAGS.sub(
+        lambda m: f"<{m.group(1)}>{_e(_tr_heading(html.unescape(m.group(2))))}{m.group(3) or ''}</{m.group(1)}>", text
+    )
+
+
 def write_reports(r: TriageResult, out_dir: Path, fmt: str) -> list[Path]:
     """fmt: md | html | json | pdf (resumen ejecutivo) | both (md+json) | all (md+html+json+pdf)."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -762,8 +818,8 @@ def write_reports(r: TriageResult, out_dir: Path, fmt: str) -> list[Path]:
         "all": {"md", "html", "json", "pdf"},
     }[fmt]
     renderers = {
-        "md": render_markdown,
-        "html": render_html,
+        "md": lambda res: localize_markdown(render_markdown(res)),
+        "html": lambda res: localize_html(render_html(res)),
         "json": lambda res: json.dumps(to_json(res), indent=2, ensure_ascii=False),
     }
     written = []

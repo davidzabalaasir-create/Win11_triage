@@ -14,6 +14,7 @@ from PIL import Image
 
 from .. import __copyright__, __version__
 from ..engine import PLACEHOLDER_KEY
+from ..i18n import t, translate_tree
 from .theme import (
     CONTROL_H,
     ICON_PNG,
@@ -57,6 +58,7 @@ def make_dot(master: tk.Misc, color: str, size: int = 10) -> tk.PhotoImage:
 def primary_button(
     master: Any, text: str, command: Callable | None = None, icon: str | None = None, **kw: Any
 ) -> ctk.CTkButton:
+    text = t(text)
     label = f"{glyph(icon)}  {text}" if icon else text
     return ctk.CTkButton(
         master,
@@ -75,6 +77,7 @@ def primary_button(
 def secondary_button(
     master: Any, text: str, command: Callable | None = None, icon: str | None = None, **kw: Any
 ) -> ctk.CTkButton:
+    text = t(text)
     label = f"{glyph(icon)}  {text}" if icon else text
     kw.setdefault("height", CONTROL_H)
     return ctk.CTkButton(
@@ -93,6 +96,7 @@ def secondary_button(
 
 
 def ghost_button(master: Any, text: str, command: Callable | None = None, **kw: Any) -> ctk.CTkButton:
+    text = t(text)
     kw.setdefault("height", 30)
     kw.setdefault("text_color", T("accent"))
     return ctk.CTkButton(
@@ -269,7 +273,7 @@ class FilterChips(ctk.CTkFrame):
             active = v == self.value
             n = self.counts.get(v)
             b.configure(
-                text=f"{v}  {n}" if n is not None else v,
+                text=f"{t(v)}  {n}" if n is not None else t(v),
                 fg_color=T("accent_soft") if active else "transparent",
                 border_color=T("accent") if active else T("border"),
                 text_color=T("accent") if active else T("text2"),
@@ -295,7 +299,7 @@ class NavRail(ctk.CTkFrame):
             bar.pack(side="left", padx=(0, SPACE["xs"]))
             btn = ctk.CTkButton(
                 row,
-                text=f"{glyph(icon)}    {label}",
+                text=f"{glyph(icon)}    {t(label)}",
                 anchor="w",
                 height=38,
                 corner_radius=RADIUS["control"],
@@ -324,7 +328,7 @@ class NavRail(ctk.CTkFrame):
     def set_label(self, key: str, text: str) -> None:
         btn = self.rows[key][2]
         icon = btn.cget("text").split("    ")[0]
-        btn.configure(text=f"{icon}    {text}")
+        btn.configure(text=f"{icon}    {t(text)}")
 
 
 # ------------------------------------------------------------------ tarjetas
@@ -365,14 +369,14 @@ class StatCard(ctk.CTkFrame):
     def set(self, value: str | int, delta: int | None = None, hint: str | None = None) -> None:
         self.value.configure(text=str(value))
         if delta is None or delta == 0:
-            self.delta.configure(text="" if delta is None else "= igual", text_color=T("text2"))
+            self.delta.configure(text="" if delta is None else t("= igual"), text_color=T("text2"))
         else:
             worse = delta > 0 and self.token in ("danger", "warning", "info")
             self.delta.configure(
                 text=f"{'▲' if delta > 0 else '▼'} {abs(delta)}", text_color=T("danger" if worse else "success")
             )
         if hint is not None:
-            self.hint.configure(text=hint)
+            self.hint.configure(text=t(hint))
 
 
 # ------------------------------------------------------------------ gráficos
@@ -532,14 +536,23 @@ def toast(
     action: tuple[str, Callable[[], None]] | None = None,
 ) -> ctk.CTkFrame:
     """Aviso flotante abajo a la derecha. Con ``action`` muestra un botón (p. ej. «Deshacer»)."""
+    text = t(text)
+    if action is not None:
+        action = (t(action[0]), action[1])
     for w in root.place_slaves():
         if getattr(w, "_is_toast", False):
             w.destroy()
     frame = ctk.CTkFrame(
-        root, fg_color=T("surface2"), corner_radius=RADIUS["card"], border_width=1, border_color=T("border")
+        root,
+        width=1,
+        height=1,
+        fg_color=T("surface2"),
+        corner_radius=RADIUS["card"],
+        border_width=1,
+        border_color=T("border"),
     )
     frame._is_toast = True  # type: ignore[attr-defined]
-    ctk.CTkFrame(frame, width=4, corner_radius=2, fg_color=T(token)).pack(
+    ctk.CTkFrame(frame, width=4, height=24, corner_radius=2, fg_color=T(token)).pack(
         side="left", fill="y", padx=(SPACE["s"], 0), pady=SPACE["s"]
     )
     ctk.CTkLabel(frame, text=text, font=font("body"), text_color=T("text")).pack(
@@ -559,8 +572,17 @@ def toast(
     return frame
 
 
+class _Menu(tk.Menu):
+    """Menú contextual que traduce sus etiquetas."""
+
+    def add_command(self, cnf: Any = None, **kw: Any) -> Any:  # type: ignore[override]
+        if "label" in kw:
+            kw["label"] = t(kw["label"])
+        return super().add_command(cnf or {}, **kw)
+
+
 def themed_menu(master: tk.Misc) -> tk.Menu:
-    return tk.Menu(
+    return _Menu(
         master,
         tearoff=0,
         bg=c("surface2"),
@@ -583,6 +605,7 @@ class Modal(ctk.CTkToplevel):
         self.transient(master)
         self.configure(fg_color=T("bg"))
         self.after(60, self._grab)
+        self.after(20, lambda: translate_tree(self))  # cuando los hijos ya están creados
         self.bind("<Escape>", lambda _e: self.destroy())
 
     def _grab(self) -> None:

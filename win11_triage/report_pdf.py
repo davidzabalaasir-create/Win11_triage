@@ -19,6 +19,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from . import __copyright__, __version__, playbook
+from .i18n import get_language, t
 from .models import Status
 from .report import SOURCE_LABEL, TriageResult, attack_summary, sort_findings, why
 
@@ -58,11 +59,11 @@ def render_pdf(r: TriageResult, out: Path) -> Path:
 
     def P(text: str, size: float = 9.5, font: str = regular, color: str = "#1A1F26", lead: float = 1.3) -> Paragraph:
         st = ParagraphStyle("p", fontName=font, fontSize=size, leading=size * lead, textColor=color, alignment=TA_LEFT)
-        return Paragraph(_safe(text, uni), st)
+        return Paragraph(_safe(t(text), uni), st)
 
     counts = r.counts()
     overall = Status.DETECTED if counts[Status.DETECTED] else Status.UNKNOWN if counts[Status.UNKNOWN] else Status.CLEAN
-    label, sentence = VERDICT[overall]
+    label, sentence = (t(x) for x in VERDICT[overall])
     W = A4[0] - 30 * mm
     story: list = []
 
@@ -74,8 +75,12 @@ def render_pdf(r: TriageResult, out: Path) -> Path:
                 logo,
                 [P("Informe ejecutivo de seguridad", 16, bold), P(f"win11-triage {__version__}", 8.5, color="#5B6573")],
                 [
-                    P(f"Equipo: {r.host}", 9, bold),
-                    P(f"{r.started:%d/%m/%Y %H:%M}" + (" · demostración" if r.dry_run else ""), 8.5, color="#5B6573"),
+                    P(f"{t('Equipo')}: {r.host}", 9, bold),
+                    P(
+                        f"{r.started:%d/%m/%Y %H:%M}" + (f" · {t('demostración')}" if r.dry_run else ""),
+                        8.5,
+                        color="#5B6573",
+                    ),
                 ],
             ]
         ],
@@ -142,12 +147,12 @@ def render_pdf(r: TriageResult, out: Path) -> Path:
             rows.append(
                 [
                     P(str(f.score), 11, bold, COLOR[f.status]),
-                    [P(f.name[:60], 9, bold), P(SOURCE_LABEL.get(f.source, f.source), 8, color="#5B6573")],
+                    [P(f.name[:60], 9, bold), P(t(SOURCE_LABEL.get(f.source, f.source)), 8, color="#5B6573")],
                     [P(adv.summary, 8.5), P("→ " + adv.steps[0], 8.5, color="#2563EB") if adv.steps else ""],
                 ]
             )
-        t = Table(rows, colWidths=[16 * mm, 55 * mm, W - 71 * mm], repeatRows=1)
-        t.setStyle(
+        tbl = Table(rows, colWidths=[16 * mm, 55 * mm, W - 71 * mm], repeatRows=1)
+        tbl.setStyle(
             TableStyle(
                 [
                     ("LINEBELOW", (0, 0), (-1, -1), 0.4, colors.HexColor("#DDE1E7")),
@@ -157,20 +162,26 @@ def render_pdf(r: TriageResult, out: Path) -> Path:
                 ]
             )
         )
-        story += [t, Spacer(1, 5 * mm)]
+        story += [tbl, Spacer(1, 5 * mm)]
 
     # técnicas ATT&CK y alcance
     techniques = attack_summary(r.findings)[:6]
     if techniques:
         text = " · ".join(f"{tid} {name} ({n})" for tid, name, n in techniques)
         story += [P("Técnicas de ataque observadas (MITRE ATT&CK)", 11, bold), P(text, 8.5), Spacer(1, 4 * mm)]
-    scope = ", ".join(r.modules) or "ninguno"
-    notes = f"Módulos ejecutados: {scope}. Elementos ignorados por lista blanca: {r.whitelisted}."
-    if r.errors:
-        notes += f" Avisos durante el análisis: {len(r.errors)} (ver informe completo)."
+    scope = ", ".join(r.modules) or t("ninguno")
+    if get_language() == "en":
+        notes = f"Modules run: {scope}. Items ignored by allowlist: {r.whitelisted}."
+        notes += f" Warnings during the scan: {len(r.errors)} (see full report)." if r.errors else ""
+    else:
+        notes = f"Módulos ejecutados: {scope}. Elementos ignorados por lista blanca: {r.whitelisted}."
+        notes += f" Avisos durante el análisis: {len(r.errors)} (ver informe completo)." if r.errors else ""
     story += [P("Alcance", 11, bold), P(notes, 8.5, color="#5B6573")]
     if top:
-        story += [Spacer(1, 3 * mm), P(f"Motivo principal del primer elemento: {why(top[0], 3)}", 8, color="#5B6573")]
+        story += [
+            Spacer(1, 3 * mm),
+            P(f"{t('Motivo principal del primer elemento')}: {why(top[0], 3)}", 8, color="#5B6573"),
+        ]
 
     def footer(canvas, doc) -> None:
         canvas.saveState()
@@ -179,7 +190,7 @@ def render_pdf(r: TriageResult, out: Path) -> Path:
         canvas.drawString(
             15 * mm, 10 * mm, _safe(f"win11-triage {__version__} · {__copyright__}", uni).replace("&amp;", "&")
         )
-        canvas.drawRightString(A4[0] - 15 * mm, 10 * mm, "Informe técnico completo: HTML/Markdown/JSON")
+        canvas.drawRightString(A4[0] - 15 * mm, 10 * mm, t("Informe técnico completo: HTML/Markdown/JSON"))
         canvas.restoreState()
 
     out.parent.mkdir(parents=True, exist_ok=True)

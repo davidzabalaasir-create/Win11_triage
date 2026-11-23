@@ -23,6 +23,7 @@ from typing import Any
 import yaml
 
 from .collectors_events import Event
+from .i18n import get_language
 from .models import Finding, Signal
 
 BUILTIN_DIR = Path(__file__).resolve().parent / "rules" / "sigma"
@@ -220,7 +221,11 @@ def load_rules(extra_dir: Path | None = None) -> tuple[list[SigmaRule], list[str
                     continue
                 rules.append(
                     SigmaRule(
-                        title=str(doc.get("title", p.stem)),
+                        title=str(
+                            doc.get("title_en")
+                            if get_language() == "en" and doc.get("title_en")
+                            else doc.get("title", p.stem)
+                        ),
                         id=str(doc.get("id", p.stem)),
                         level=str(doc.get("level", "medium")).lower(),
                         tags=[str(t) for t in doc.get("tags", [])],

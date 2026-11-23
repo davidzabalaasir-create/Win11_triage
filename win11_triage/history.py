@@ -29,12 +29,21 @@ class HistoryEntry:
         return p if p.exists() else None
 
 
-def finding_key(source: str, path: str, sha256: str, name: str = "") -> str:
-    """Identidad estable de un hallazgo entre ejecuciones (para detectar novedades)."""
+def finding_key(source: str, path: str, sha256: str, name: str = "", rule: str = "") -> str:
+    """Identidad estable de un hallazgo entre ejecuciones (igual que ``Finding.key``)."""
     ident = (path or name).strip().strip(chr(34)).lower()
     if source == "sigma":  # varias reglas pueden coincidir en el mismo binario
-        ident = f"{name.lower()}|{ident}"
+        ident = f"{(rule or name).lower()}|{ident}"
     return f"{source}|{ident}|{(sha256 or '').lower()}"
+
+
+def _rule_or_name(x: dict) -> str:
+    """Para Sigma, el id de la regla (igual que Finding.key); si no, el nombre."""
+    if x.get("source") == "sigma":
+        for s in x.get("signals") or []:
+            if str(s.get("id", "")).startswith("SIGMA_"):
+                return str(s["id"])
+    return x.get("name", "")
 
 
 def key_of(f: Finding) -> str:
@@ -57,7 +66,13 @@ def list_reports(folder: Path, limit: int = 200) -> list[HistoryEntry]:
                     summary=dict(d.get("summary", {})),
                     max_score=int(d.get("max_score", 0)),
                     keys=frozenset(
-                        finding_key(x.get("source", ""), x.get("path", ""), x.get("sha256", ""), x.get("name", ""))
+                        finding_key(
+                            x.get("source", ""),
+                            x.get("path", ""),
+                            x.get("sha256", ""),
+                            x.get("name", ""),
+                            _rule_or_name(x),
+                        )
                         for x in d.get("findings", [])
                     ),
                 )
