@@ -208,3 +208,19 @@ def test_english_interface(tmp_path):
     finally:
         a.destroy()
         i18n.set_language("es")
+
+
+def test_assistant_page(app, monkeypatch):
+    from test_agent import FakeLLM
+
+    from win11_triage import agent
+
+    monkeypatch.setenv("GROQ_API_KEY", "k")
+    monkeypatch.setattr(agent, "new_session", lambda: FakeLLM())
+    monkeypatch.setattr("win11_triage.gui.app.load_dotenv", lambda *a, **k: None)
+    _run(app)
+    app.show_page("assistant")
+    app.chat_entry.insert(0, "¿Qué reviso primero?")
+    app.ask_agent()
+    _pump_until(app, lambda: "Lo más grave" in app.chat_box.get("1.0", "end"))
+    assert str(app.chat_send.cget("state")) == "normal"

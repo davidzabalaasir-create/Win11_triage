@@ -31,6 +31,7 @@ import requests
 from dotenv import load_dotenv, set_key
 
 from .. import __version__, alerts, collectors_live, env_check, history, i18n, playbook, report, scheduler
+from .. import agent as agent_mod
 from ..engine import PLACEHOLDER_KEY, Reporter, TriageEngine, TriageOptions
 from ..enrich import pe_static, yara_scan
 from ..models import Cancelled, Finding, Status
@@ -105,6 +106,7 @@ PAGES = (
     ("findings", "Hallazgos", "findings"),
     ("network", "Red", "network"),
     ("processes", "Procesos", "tree"),
+    ("assistant", "Asistente", "chat"),
     ("history", "Historial", "history"),
     ("settings", "Ajustes", "settings"),
 )
@@ -113,6 +115,7 @@ PAGE_SUBTITLE = {
     "findings": "Todo lo encontrado, con el porqué de cada elemento",
     "network": "Conexiones externas de los procesos señalados",
     "processes": "Árbol padre → hijo; las ramas con procesos señalados aparecen desplegadas",
+    "assistant": "Pregunta en lenguaje natural sobre el análisis",
     "history": "Análisis anteriores guardados en la carpeta de informes",
     "settings": "Claves, listas blancas, herramientas y apariencia",
 }
@@ -231,6 +234,7 @@ class TriageApp(ctk.CTk):
         if not self.windows:
             self.log_line("AVISO", "Este sistema no es Windows: solo está disponible el modo demostración.")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.update_agent_status()
         i18n.translate_tree(self)
         self.after(100, self.poll_events)
 
@@ -341,6 +345,7 @@ class TriageApp(ctk.CTk):
             ("findings", self._page_findings),
             ("network", self._page_network),
             ("processes", self._page_processes),
+            ("assistant", self._page_assistant),
             ("history", self._page_history),
             ("settings", self._page_settings),
         ):
@@ -637,6 +642,121 @@ class TriageApp(ctk.CTk):
         self.proc_tree.bind("<Double-1>", lambda _e: self.jump_to_process())
         self.proc_empty = ctk.CTkLabel(frame, text="", font=font("body"), text_color=T("text2"), fg_color=T("surface"))
 
+    def _page_assistant(self, page: ctk.CTkFrame) -> None:
+        bar = ctk.CTkFrame(page, fg_color="transparent")
+        bar.pack(fill="x", pady=(0, SPACE["m"]))
+        self.agent_status = Badge(bar, "", "warning")
+        self.agent_status.pack(side="left")
+        ghost_button(bar, "Nueva conversación", self.reset_agent, width=170).pack(side="right")
+        secondary_button(bar, "Configurar…", lambda: self.show_page("settings"), icon="key", width=150).pack(
+            side="right", padx=SPACE["s"]
+        )
+        self.chat_box = ctk.CTkTextbox(
+            page,
+            fg_color=T("surface"),
+            border_width=1,
+            border_color=T("border"),
+            corner_radius=RADIUS["card"],
+            font=font("body"),
+            wrap="word",
+        )
+        self.chat_box.pack(fill="both", expand=True)
+        self.chat_box.tag_config("user", foreground=c("accent"))
+        self.chat_box.tag_config("meta", foreground=c("text2"))
+        self.chat_box.configure(state="disabled")
+        chips = ctk.CTkFrame(page, fg_color="transparent")
+        chips.pack(fill="x", pady=(SPACE["s"], 0))
+        for q in agent_mod.SUGGESTIONS:
+            ctk.CTkButton(
+                chips,
+                text=q,
+                height=28,
+                corner_radius=14,
+                border_width=1,
+                border_color=T("border"),
+                fg_color="transparent",
+                hover_color=T("surface2"),
+                text_color=T("text2"),
+                font=font("caption"),
+                command=lambda q=q: self.ask_agent(i18n.t(q)),
+            ).pack(side="left", padx=(0, SPACE["s"]))
+        row = ctk.CTkFrame(page, fg_color="transparent")
+        row.pack(fill="x", pady=(SPACE["s"], 0))
+        self.chat_entry = ctk.CTkEntry(
+            row,
+            height=CONTROL_H,
+            corner_radius=RADIUS["control"],
+            fg_color=T("surface2"),
+            border_color=T("border"),
+            font=font("body"),
+            placeholder_text="Escribe tu pregunta y pulsa Intro",
+        )
+        self.chat_entry.pack(side="left", fill="x", expand=True)
+        self.chat_entry.bind("<Return>", lambda _e: self.ask_agent())
+        self.chat_send = primary_button(row, "Enviar", self.ask_agent, icon="play", width=120)
+        self.chat_send.pack(side="left", padx=(SPACE["s"], 0))
+        ctk.CTkLabel(
+            page,
+            text="Se envía un resumen del análisis sin tu usuario ni el nombre del equipo. "
+            "El asistente solo consulta datos: no cambia nada.",
+            font=font("caption"),
+            text_color=T("text2"),
+        ).pack(anchor="w", pady=(SPACE["xs"], 0))
+        self.agent: agent_mod.Agent | None = None
+        self.chat_write(
+            i18n.t("Hola. Haz un análisis (o carga uno del historial) y pregúntame lo que quieras sobre él."), "meta"
+        )
+
+    def update_agent_status(self) -> None:
+        cfg = agent_mod.AgentConfig.from_env()
+        if cfg.ready:
+            self.agent_status.set(f"{cfg.provider} · {cfg.model}", "success")
+        else:
+            self.agent_status.set(i18n.t("Sin clave de Groq"), "warning")
+
+    def chat_write(self, text: str, tag: str = "") -> None:
+        self.chat_box.configure(state="normal")
+        self.chat_box.insert("end", text + "\n\n", tag)
+        self.chat_box.configure(state="disabled")
+        self.chat_box.see("end")
+
+    def reset_agent(self) -> None:
+        if self.agent is not None:
+            self.agent.reset()
+        self.chat_box.configure(state="normal")
+        self.chat_box.delete("1.0", "end")
+        self.chat_box.configure(state="disabled")
+        self.chat_write(i18n.t("Conversación nueva."), "meta")
+
+    def ask_agent(self, question: str | None = None) -> None:
+        q = (question or self.chat_entry.get()).strip()
+        if not q or str(self.chat_send.cget("state")) == "disabled":
+            return
+        if self.result is None:
+            toast(self, "Primero haz o carga un análisis.", "warning")
+            return
+        load_dotenv(self.env_file, override=True)
+        if self.agent is None or self.agent.res is not self.result:
+            self.agent = agent_mod.Agent(self.result)
+        self.chat_entry.delete(0, "end")
+        self.chat_write(f"› {q}", "user")
+        self.chat_send.configure(state="disabled")
+        self.set_status("Pensando…")
+        self.indeterminate(True)
+        agent = self.agent
+
+        def work() -> None:
+            try:
+                answer = agent.ask(q, on_tool=lambda n: self.events.put(("agent_tool", n)))
+                self.events.put(("agent_reply", answer))
+            except agent_mod.AgentError as e:
+                self.events.put(("agent_reply", f"⚠ {e}"))
+            except Exception as e:  # nunca debe tumbar la interfaz
+                log.exception("Error del asistente")
+                self.events.put(("agent_reply", f"⚠ {type(e).__name__}: {e}"))
+
+        threading.Thread(target=work, daemon=True).start()
+
     def render_process_tree(self) -> None:
         tree = self.proc_tree
         tree.delete(*tree.get_children())
@@ -752,6 +872,21 @@ class TriageApp(ctk.CTk):
         secondary_button(vt, "Configurar clave…", self.edit_api_key, icon="key", width=200).pack(
             anchor="w", padx=SPACE["l"], pady=SPACE["l"]
         )
+
+        ai = section(
+            4, 1, "Asistente de IA", "Groq es gratuito (console.groq.com). Ollama funciona sin Internet en tu PC."
+        )
+        self.ai_provider = ctk.CTkSegmentedButton(
+            ai, values=["Groq", "Ollama"], command=self.set_ai_provider, height=CONTROL_H, **segmented_style()
+        )
+        self.ai_provider.set("Ollama" if os.environ.get("AI_PROVIDER", "").lower() == "ollama" else "Groq")
+        self.ai_provider.pack(anchor="w", padx=SPACE["l"])
+        secondary_button(
+            ai,
+            "Clave de Groq…",
+            lambda: self.edit_secret("Groq", "GROQ_API_KEY", "https://console.groq.com/keys"),
+            icon="key",
+        ).pack(fill="x", padx=SPACE["l"], pady=(SPACE["s"], SPACE["l"]))
 
         rep = section(3, 0, "Reputación (opcional)", "AbuseIPDB para IPs remotas y MalwareBazaar para hashes.")
         for service, var, url in INTEL_KEYS:
@@ -1136,6 +1271,13 @@ class TriageApp(ctk.CTk):
             self.indeterminate(False)
         elif kind == "toast":
             toast(self, ev[1], ev[2])
+        elif kind == "agent_tool":
+            self.set_status(f"{i18n.t('Consultando')}: {ev[1]}…")
+        elif kind == "agent_reply":
+            self.indeterminate(False)
+            self.chat_send.configure(state="normal")
+            self.set_status("Listo.")
+            self.chat_write(ev[1].replace("**", ""))
         elif kind == "log":
             self.log_line(ev[1], ev[2])
             if ev[1] == "INFO":
@@ -1949,6 +2091,11 @@ class TriageApp(ctk.CTk):
         toast(self, f"Exportado: {target.name}", "success", action=("Abrir", lambda: open_path(target)))
 
     # ================================================================= configuración
+    def set_ai_provider(self, label: str) -> None:
+        self.store_env("AI_PROVIDER", label.lower())
+        self.update_agent_status()
+        toast(self, f"Asistente: {label}.", "success")
+
     def set_language(self, label: str) -> None:
         code = next((k for k, v in i18n.LANGUAGES.items() if v == label), "es")
         if code == self.prefs.get("language", "es"):
@@ -1968,6 +2115,7 @@ class TriageApp(ctk.CTk):
         if dlg.value is None:
             return
         self.store_env(var, dlg.value)
+        self.update_agent_status()
         toast(self, f"Clave de {service} guardada.", "success")
 
     def store_env(self, var: str, value: str) -> None:

@@ -140,6 +140,9 @@ def build_parser() -> argparse.ArgumentParser:
     opt.add_argument(
         "--explain", action="store_true", help="«¿Qué hago con esto?»: pasos recomendados para los 5 más graves"
     )
+    ai = p.add_argument_group("asistente de IA (Groq gratis u Ollama local)")
+    ai.add_argument("--ask", metavar="PREGUNTA", help="pregunta al asistente sobre el análisis (GROQ_API_KEY en .env)")
+    ai.add_argument("--report", type=Path, metavar="JSON", help="usa un informe JSON existente en vez de analizar")
     opt.add_argument("--check-update", action="store_true", help="comprueba si hay una versión nueva y sale")
     opt.add_argument(
         "--lang",
@@ -345,6 +348,8 @@ def run(args: argparse.Namespace) -> int:
     if args.explain:
         print_explain(res)
     send_alerts(args, res)
+    if args.ask:
+        ask_agent(res, args.ask)
 
     if opts.dry_run:
         return EXIT_OK  # el dry-run solo valida la estructura
@@ -367,6 +372,38 @@ def print_explain(res: TriageResult) -> None:
                 border_style="red" if f.status == Status.DETECTED else "yellow",
             )
         )
+
+
+def ask_agent(res: TriageResult, question: str) -> int:
+    from .agent import Agent, AgentError
+
+    agent = Agent(res)
+    console.rule(f"[bold magenta]{t('Asistente de IA')}[/] [dim]({agent.config.provider} · {agent.config.model})[/]")
+    try:
+        with console.status(t("Pensando…")):
+            answer = agent.ask(question, on_tool=lambda n: console.print(f"[dim]  · {n}[/]"))
+    except AgentError as e:
+        console.print(f"[red]{e}[/]")
+        return EXIT_ENV
+    from rich.markdown import Markdown
+
+    console.print(Markdown(answer))
+    return EXIT_OK
+
+
+def ask_report(args: argparse.Namespace) -> int:
+    """--report FICHERO [--ask PREGUNTA]: carga un análisis guardado; sin --ask lo resume."""
+    load_dotenv(args.config_dir / ".env")
+    try:
+        res = report.load_json(args.report)
+    except (OSError, ValueError, KeyError) as e:
+        console.print(f"[red]No se pudo leer {args.report}: {e}[/]")
+        return EXIT_ENV
+    res.reviews = ReviewStore(args.config_dir).data
+    if not args.ask:
+        print_results(res)
+        return EXIT_OK
+    return ask_agent(res, args.ask)
 
 
 def send_alerts(args: argparse.Namespace, res: TriageResult) -> None:
@@ -456,6 +493,8 @@ def main(argv: list[str] | None = None) -> int:
         return check_update()
     if args.schedule:
         return schedule(args)
+    if args.report:
+        return ask_report(args)
     if args.gui:
         from .gui import main as gui_main
 

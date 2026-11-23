@@ -140,6 +140,7 @@ _GLYPHS = {
     "findings": ("\ue7ba", "⚑"),
     "network": ("\ue968", "⇄"),
     "tree": ("\ue8fd", "⑂"),
+    "chat": ("\ue8bd", "✉"),
     "history": ("\ue81c", "⟲"),
     "settings": ("\ue713", "⚙"),
     "play": ("\ue768", "▶"),

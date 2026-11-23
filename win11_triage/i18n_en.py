@@ -83,6 +83,33 @@ EN: dict[str, str] = {
     "Revisados": "Reviewed",
     "teclas": "keys",
     "Ver": "View",
+    "Asistente de IA": "AI assistant",
+    "Asistente": "Assistant",
+    "Pensando…": "Thinking…",
+    "Consultando": "Looking up",
+    "Pregunta en lenguaje natural sobre el análisis": "Ask questions about the scan in plain language",
+    "Nueva conversación": "New conversation",
+    "Conversación nueva.": "New conversation.",
+    "Configurar…": "Configure…",
+    "Enviar": "Send",
+    "Escribe tu pregunta y pulsa Intro": "Type your question and press Enter",
+    "Se envía un resumen del análisis sin tu usuario ni el nombre del equipo. El asistente solo consulta datos: "
+    "no cambia nada.": (
+        "A summary of the scan is sent without your user name or computer name. The assistant only reads data: "
+        "it changes nothing."
+    ),
+    "Hola. Haz un análisis (o carga uno del historial) y pregúntame lo que quieras sobre él.": (
+        "Hi. Run a scan (or load one from the history) and ask me anything about it."
+    ),
+    "Sin clave de Groq": "No Groq key",
+    "Primero haz o carga un análisis.": "Run or load a scan first.",
+    "Groq es gratuito (console.groq.com). Ollama funciona sin Internet en tu PC.": (
+        "Groq is free (console.groq.com). Ollama runs offline on your PC."
+    ),
+    "¿Qué debería revisar primero?": "What should I check first?",
+    "¿Mi equipo está infectado?": "Is my computer infected?",
+    "Explícame el hallazgo más grave en palabras sencillas": "Explain the most serious finding in simple words",
+    "¿Qué técnicas de ataque se ven y qué significan?": "Which attack techniques show up and what do they mean?",
     "no encontrado": "not found",
     "= igual": "= same",
     " · cargado del historial": " · loaded from history",

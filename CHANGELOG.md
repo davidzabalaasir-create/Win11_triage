@@ -17,6 +17,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y 
 - **Inglés**: interfaz, informes, PDF y recomendaciones (`--lang en` o Ajustes → Idioma).
 - **Paquete MSIX** para Microsoft Store (`scripts/build_msix.ps1`) y guía de publicación en `docs/MICROSOFT_STORE.md`.
 - **Página web** del proyecto en GitHub Pages (`site/`).
+- **Asistente de IA**: página «Asistente» y `--ask "pregunta"` (también sobre informes guardados con `--report`).
+  - Usa Groq (gratuito) u Ollama (local).
+  - Consulta los datos del análisis con herramientas de solo lectura.
+  - Anonimiza el usuario y el nombre del equipo.
 
 ### Corregido
 - Los avisos flotantes ocupaban 200 px de alto.

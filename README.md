@@ -17,7 +17,7 @@ Herramienta de **triaje defensivo y respuesta a incidentes** para Windows 11. Ex
 
 Con todo ello, **puntúa cada elemento de 0 a 100 explicando por qué** y lo relaciona con técnicas de **MITRE ATT&CK**.
 
-Para cada hallazgo te dice **«¿Qué hago con esto?»** con pasos concretos. Se usa con **interfaz gráfica** (español o inglés) o desde la **línea de comandos**, en este equipo o en **otros por WinRM**, y puede vigilar el equipo con **análisis programados** que avisan solo de lo nuevo. Es **solo lectura**: nunca borra, termina procesos ni sube ficheros.
+Para cada hallazgo te dice **«¿Qué hago con esto?»** con pasos concretos, y un **asistente de IA** (Groq gratuito u Ollama local) responde a tus preguntas sobre el análisis. Se usa con **interfaz gráfica** (español o inglés) o desde la **línea de comandos**, en este equipo o en **otros por WinRM**, y puede vigilar el equipo con **análisis programados** que avisan solo de lo nuevo. Es **solo lectura**: nunca borra, termina procesos ni sube ficheros.
 
 🌐 Página del proyecto: <https://davidzabalaasir-create.github.io/Win11_triage/>
 
@@ -184,6 +184,29 @@ win11-triage --all --lang en --format pdf        # resumen ejecutivo en inglés
 - `130`: interrumpido.
 
 Sirven para tareas programadas o pipelines.
+
+## Asistente de IA
+
+Pregunta en lenguaje natural sobre un análisis: «¿qué reviso primero?», «¿estoy infectado?», «explícame este hallazgo».
+
+```powershell
+win11-triage --all --ask "¿Qué debería revisar primero?"
+win11-triage --report reportes\triage_PC_20261123_0930.json --ask "¿Es grave lo de sethc.exe?"
+```
+
+En la interfaz: página **Asistente** (con preguntas sugeridas) y la clave en **Ajustes → Asistente de IA**.
+
+| Proveedor | Coste | Configuración (`.env`) |
+|---|---|---|
+| **Groq** (por defecto, modelo `openai/gpt-oss-120b`) | Gratis con límites diarios | `GROQ_API_KEY` ([crear clave](https://console.groq.com/keys)) |
+| **Ollama** (en tu PC, sin Internet) | Gratis | `AI_PROVIDER=ollama` y `AI_MODEL=llama3.1` |
+| Otro compatible con OpenAI | Según el servicio | `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY` |
+
+**Privacidad y seguridad:**
+- Se envía un **resumen** del análisis. El detalle de un hallazgo solo se envía cuando el asistente lo pide.
+- El usuario de Windows y el nombre del equipo se sustituyen por `<usuario>` y `<equipo>`.
+- Nunca se envían ficheros.
+- El asistente solo tiene herramientas de **lectura**: listar y ver hallazgos, cadenas de procesos y proponer una entrada de lista blanca, que no aplica. No puede cambiar nada del equipo.
 
 ## Informes
 
